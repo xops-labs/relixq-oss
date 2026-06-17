@@ -1,0 +1,244 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: MOVE_USE_STD_ED25519
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+std::ed25519\\b"
+  message: "use std::ed25519 — Diem-derived Ed25519 stdlib import; Edwards-curve discrete log is quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_USE_APTOS_ED25519
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+aptos_std::ed25519\\b"
+  message: "use aptos_std::ed25519 — Aptos framework Ed25519 import; quantum-vulnerable (Shor on Edwards-curve DLP)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_USE_APTOS_SECP256K1
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+aptos_std::secp256k1\\b"
+  message: "use aptos_std::secp256k1 — Aptos secp256k1 ECDSA import; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_USE_SUI_ECDSA_K1
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+sui::ecdsa_k1\\b"
+  message: "use sui::ecdsa_k1 — Sui secp256k1 ECDSA import; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_USE_SUI_ECDSA_R1
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+sui::ecdsa_r1\\b"
+  message: "use sui::ecdsa_r1 — Sui secp256r1 (P-256) ECDSA import; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_USE_HASH_SHA2_256
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "use\\s+(?:0x1|std)::hash::sha2_256\\b"
+  message: "use 0x1::hash::sha2_256 — SHA-256 stdlib import; Grover halves effective preimage security from 256 to 128 bits."
+  confidence: 0.4
+
+- id: MOVE_USE_HASH_SHA3_256
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "SHA3-256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "use\\s+(?:0x1|std)::hash::sha3_256\\b"
+  message: "use 0x1::hash::sha3_256 — SHA3-256 stdlib import; Grover halves effective preimage security."
+  confidence: 0.4
+
+- id: MOVE_HASH_SHA2_256_CALL
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "0x1::hash::sha2_256\\s*\\("
+  message: "0x1::hash::sha2_256(...) — direct SHA-256 invocation; Grover-halved preimage security, inventory for PQC migration plan."
+  confidence: 0.5
+
+- id: MOVE_HASH_SHA3_256_CALL
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "SHA3-256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "0x1::hash::sha3_256\\s*\\("
+  message: "0x1::hash::sha3_256(...) — direct SHA3-256 invocation; Grover-halved preimage security."
+  confidence: 0.5
+
+- id: MOVE_SUI_KECCAK256
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "Keccak256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "sui::hash::keccak256\\s*\\("
+  message: "sui::hash::keccak256(...) — Ethereum-compat hash; Grover halves preimage security from 256 to 128 bits."
+  confidence: 0.6
+
+- id: MOVE_ECDSA_RECOVER
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "aptos_std::secp256k1::ecdsa_recover\\b"
+  message: "aptos_std::secp256k1::ecdsa_recover(...) — secp256k1 signature recovery on Aptos; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_ED25519_VERIFY
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "ed25519::signature_verify_strict\\b"
+  message: "ed25519::signature_verify_strict(...) — Ed25519 signature verification; quantum-vulnerable (Shor on Edwards-curve DLP)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: MOVE_ED25519_NEW_SIGNATURE
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "ed25519::new_signature\\b"
+  message: "ed25519::new_signature(...) — Ed25519 signature deserialization; quantum-vulnerable primitive."
+  cwe: [327]
+  confidence: 0.9
+
+- id: MOVE_SECP256K1_ECDSA_VERIFY
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "secp256k1::ecdsa_verify\\b"
+  message: "secp256k1::ecdsa_verify(...) — secp256k1 ECDSA verification; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.92
+
+- id: MOVE_SECP256K1_ECDSA_SIGN
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "secp256k1::ecdsa_sign\\b"
+  message: "secp256k1::ecdsa_sign(...) — secp256k1 ECDSA signing; quantum-vulnerable primitive."
+  cwe: [327]
+  confidence: 0.88
+
+- id: MOVE_BCS_TO_BYTES_SIGNATURE
+  language: move
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "BCS"
+  usage_type: "serialization"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "bcs::to_bytes\\s*\\(\\s*&?\\s*(?:[A-Za-z_][A-Za-z0-9_]*\\.)?(?:signature|sig|pubkey|public_key|priv_key|private_key|secret_key|key)\\b"
+  message: "bcs::to_bytes(&signature/pubkey/key) — BCS-serializing signature/key material; data-flow hint for the PQC inventory."
+  confidence: 0.5

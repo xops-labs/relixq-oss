@@ -1,0 +1,230 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Apache HTTPD / mod_ssl TLS rules
+#
+# Apache's SSLProtocol / SSLCipherSuite / SSLProxyProtocol directives are the
+# moral equivalent of nginx's ssl_protocols/ssl_ciphers. Same exposure class
+# (public TLS handshake parameters), different syntax. Rules are scoped via
+# `language: apache` + `file_globs` so they only fire on httpd.conf-like files.
+- id: APACHE_SSLPROTOCOL_DEPRECATED
+  language: apache
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLProtocol\b[^#\r\n]*[+\s](SSLv2|SSLv3|TLSv1|TLSv1\.1)\b'
+    flags: i
+  message: "Apache SSLProtocol enables a deprecated TLS/SSL version."
+  recommendation: "Use 'SSLProtocol -all +TLSv1.2 +TLSv1.3' (or TLSv1.3-only where clients permit)."
+  references:
+    - "https://httpd.apache.org/docs/2.4/mod/mod_ssl.html#sslprotocol"
+    - "https://datatracker.ietf.org/doc/html/rfc8996"
+  cwe: [327, 326]
+  confidence: 0.95
+  examples:
+    match:
+      - 'SSLProtocol +TLSv1 +TLSv1.1'
+    no_match:
+      - 'SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1'
+- id: APACHE_SSLCIPHERSUITE_RC4
+  language: apache
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCipherSuite\b[^#\r\n]*\bRC4\b'
+    flags: i
+  message: "Apache SSLCipherSuite references the broken RC4 stream cipher."
+  recommendation: "Remove RC4 from SSLCipherSuite. Use AEAD ciphers or rely on TLS 1.3 defaults."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc7465"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'SSLCipherSuite RC4-SHA:HIGH'
+    no_match:
+      - 'SSLCipherSuite HIGH:!aNULL:!MD5'
+- id: APACHE_SSLCIPHERSUITE_DES_3DES
+  language: apache
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCipherSuite\b[^#\r\n]*\b(3DES|DES-CBC3|DES_CBC3|!?DES\b)'
+    flags: i
+  message: "Apache SSLCipherSuite references DES/3DES (SWEET32 exposure)."
+  recommendation: "Remove DES/3DES suites. Use AES-GCM or ChaCha20-Poly1305."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'SSLCipherSuite DES-CBC3-SHA:HIGH'
+    no_match:
+      - 'SSLCipherSuite ECDHE-ECDSA-AES256-GCM-SHA384'
+- id: APACHE_SSLCIPHERSUITE_MD5_EXPORT
+  language: apache
+  category: weak-cipher
+  severity: critical
+  algorithm: EXPORT
+  usage_type: encryption
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCipherSuite\b[^#\r\n]*\b(MD5|EXPORT|EXP-|LOW|MEDIUM)\b'
+    flags: i
+  message: "Apache SSLCipherSuite includes MD5/EXPORT/LOW/MEDIUM cipher classes."
+  recommendation: "Drop MD5 and EXPORT/LOW/MEDIUM classes. Pin a modern explicit cipher list or use TLS 1.3 defaults."
+  references:
+    - "https://weakdh.org/"
+    - "https://freakattack.com/"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'SSLCipherSuite EXP-RC4-MD5:LOW'
+    no_match:
+      - 'SSLCipherSuite HIGH:!aNULL'
+- id: APACHE_SSLCIPHERSUITE_CBC_ONLY
+  language: apache
+  category: weak-cipher
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCipherSuite\b[^#\r\n]*\bAES(128|256)-SHA\b'
+    flags: i
+  message: "Apache SSLCipherSuite references CBC-mode AES suites without an explicit AEAD partner."
+  recommendation: "Replace CBC-mode AES*-SHA suites with AEAD: TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3) or ECDHE-*-AES*-GCM-SHA* (TLS 1.2)."
+  cwe: [327]
+  confidence: 0.6
+  examples:
+    match:
+      - 'SSLCipherSuite AES128-SHA:AES256-SHA'
+    no_match:
+      - 'SSLCipherSuite AES128-SHA256'
+- id: APACHE_SSLPROXYPROTOCOL_DEPRECATED
+  language: apache
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLProxyProtocol\b[^#\r\n]*[+\s](SSLv2|SSLv3|TLSv1|TLSv1\.1)\b'
+    flags: i
+  message: "Apache SSLProxyProtocol enables a deprecated TLS version for upstream proxying."
+  recommendation: "Set 'SSLProxyProtocol -all +TLSv1.2 +TLSv1.3'."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'SSLProxyProtocol +TLSv1'
+    no_match:
+      - 'SSLProxyProtocol all -SSLv3 -TLSv1 -TLSv1.1'
+- id: APACHE_SSLHONORCIPHERORDER_OFF
+  language: apache
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLHonorCipherOrder\s+off\b'
+    flags: i
+  message: "Apache SSLHonorCipherOrder is off — clients can negotiate weaker ciphers than the server prefers."
+  recommendation: "Set 'SSLHonorCipherOrder on' so the server-configured cipher order wins under TLS 1.2."
+  cwe: [757]
+  confidence: 0.85
+  examples:
+    match:
+      - 'SSLHonorCipherOrder off'
+    no_match:
+      - 'SSLHonorCipherOrder on'
+- id: APACHE_SSLCERTKEY_INSECURE_PATH
+  language: apache
+  category: hardcoded-key
+  severity: high
+  algorithm: TLS
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCertificateKeyFile\s+("?)(/tmp/|/var/tmp/|\./|\.\./)'
+  message: "Apache SSLCertificateKeyFile points at an insecure path (temp / relative directory)."
+  recommendation: "Store TLS private keys under /etc/ssl/private/ (mode 0600) or load via a secret manager."
+  cwe: [798, 922]
+  confidence: 0.85
+  examples:
+    match:
+      - 'SSLCertificateKeyFile /tmp/server.key'
+    no_match:
+      - 'SSLCertificateKeyFile /etc/ssl/private/server.key'
+- id: APACHE_SSLENGINE_OFF
+  language: apache
+  category: misconfig
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLEngine\s+off\b'
+    flags: i
+  message: "Apache SSLEngine is explicitly disabled on this VirtualHost — traffic is plaintext."
+  recommendation: "If this VirtualHost serves user traffic, set 'SSLEngine on' and provision a certificate. Otherwise confirm this is the intentional :80 redirect host."
+  cwe: [319]
+  confidence: 0.6
+  examples:
+    match:
+      - 'SSLEngine off'
+    no_match:
+      - 'SSLEngine on'
+- id: APACHE_SSLCOMPRESSION_ON
+  language: apache
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.htaccess", "httpd.conf", "apache2.conf", "*.apache.conf", "sites-available/*.conf", "vhosts.d/*.conf"]
+  detector:
+    type: regex
+    pattern: '^\s*SSLCompression\s+on\b'
+    flags: i
+  message: "Apache SSLCompression is enabled (CRIME attack exposure)."
+  recommendation: "Set 'SSLCompression off' (default in 2.4.4+). Compression at the TLS layer leaks plaintext via length oracles."
+  references:
+    - "https://en.wikipedia.org/wiki/CRIME"
+  cwe: [310]
+  confidence: 0.95
+  examples:
+    match:
+      - 'SSLCompression on'
+    no_match:
+      - 'SSLCompression off'

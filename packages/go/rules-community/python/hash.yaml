@@ -1,0 +1,134 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Python weak-hash rules
+# Extracted as a standalone OSS pack so the community Python surface is not
+# empty (python/{rsa,ecc}.yaml are crypto-api).
+# These are regex detectors (per-line, single-line patterns) mirroring the
+# csharp/hash.yaml schema. The pyast runner separately carries call:hashlib.md5
+# / call:hashlib.sha1 AST rules (PYTHON_HASHLIB_MD5 / _SHA1 in rsa.yaml); these
+# regex rules use distinct IDs and additionally cover the hashlib.new(...) and
+# pycryptodome Crypto.Hash.* forms the AST queries do not reach.
+- id: PYTHON_HASHLIB_MD5_REGEX
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bhashlib\.md5\s*\('
+  message: "hashlib.md5 is cryptographically broken and must not be used for security-sensitive hashing."
+  recommendation: "Use hashlib.sha256 or hashlib.sha3_256; pass usedforsecurity=False only for non-security checksums."
+  references:
+    - "https://docs.python.org/3/library/hashlib.html"
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'digest = hashlib.md5(data).hexdigest()'
+    no_match:
+      - 'digest = hashlib.sha256(data).hexdigest()'
+- id: PYTHON_HASHLIB_SHA1_REGEX
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bhashlib\.sha1\s*\('
+  message: "hashlib.sha1 is cryptographically broken (SHAttered collision, 2017)."
+  recommendation: "Use hashlib.sha256 or hashlib.sha3_256."
+  references:
+    - "https://shattered.io/"
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'digest = hashlib.sha1(data).hexdigest()'
+    no_match:
+      - 'digest = hashlib.sha256(data).hexdigest()'
+- id: PYTHON_HASHLIB_NEW_MD5
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Matches hashlib.new('md5') / hashlib.new("MD5") — case-insensitive alg name.
+  detector:
+    type: regex
+    pattern: '\bhashlib\.new\s*\(\s*[''"](?i:md5)[''"]'
+  message: "hashlib.new('md5') selects the broken MD5 algorithm by name."
+  recommendation: "Use hashlib.new('sha256') or a dedicated hashlib.sha256 constructor."
+  cwe: [328]
+  confidence: 0.9
+  examples:
+    match:
+      - 'h = hashlib.new("md5")'
+    no_match:
+      - 'h = hashlib.new("sha256")'
+- id: PYTHON_HASHLIB_NEW_SHA1
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Matches hashlib.new('sha1') / hashlib.new("SHA1") — case-insensitive alg name.
+  detector:
+    type: regex
+    pattern: '\bhashlib\.new\s*\(\s*[''"](?i:sha-?1)[''"]'
+  message: "hashlib.new('sha1') selects the broken SHA-1 algorithm by name."
+  recommendation: "Use hashlib.new('sha256') or a dedicated hashlib.sha256 constructor."
+  cwe: [328]
+  confidence: 0.9
+  examples:
+    match:
+      - 'h = hashlib.new("sha1")'
+      - 'h = hashlib.new(''SHA-1'')'
+    no_match:
+      - 'h = hashlib.new("sha256")'
+- id: PYTHON_PYCRYPTODOME_MD5
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # pycryptodome / PyCrypto: from Crypto.Hash import MD5; MD5.new(...)
+  detector:
+    type: regex
+    pattern: '\bCrypto\.Hash\.MD5\b|\bMD5\.new\s*\('
+  message: "Crypto.Hash.MD5 (pycryptodome) uses the broken MD5 algorithm."
+  recommendation: "Use Crypto.Hash.SHA256 or Crypto.Hash.SHA3_256."
+  cwe: [328]
+  confidence: 0.85
+  examples:
+    match:
+      - 'h = MD5.new(data)'
+    no_match:
+      - 'h = SHA256.new(data)'
+- id: PYTHON_PYCRYPTODOME_SHA1
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # pycryptodome / PyCrypto: from Crypto.Hash import SHA1; SHA1.new(...)
+  detector:
+    type: regex
+    pattern: '\bCrypto\.Hash\.SHA1\b|\bSHA1\.new\s*\('
+  message: "Crypto.Hash.SHA1 (pycryptodome) uses the broken SHA-1 algorithm."
+  recommendation: "Use Crypto.Hash.SHA256 or Crypto.Hash.SHA3_256."
+  cwe: [328]
+  confidence: 0.85
+  examples:
+    match:
+      - 'h = SHA1.new(data)'
+    no_match:
+      - 'h = SHA3_256.new(data)'

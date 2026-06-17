@@ -1,0 +1,72 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: SHELL_OPENSSL_GENRSA_2048
+  language: shell
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: "openssl\\s+genrsa\\s+(?:-out\\s+\\S+\\s+)?2048\\b"
+  message: "openssl genrsa 2048 — meets classical guidance but is quantum-vulnerable; inventory for PQC migration."
+  cwe: [327]
+  confidence: 0.85
+
+- id: SHELL_OPENSSL_REQ_NEWKEY_RSA_2048
+  language: shell
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: "openssl\\s+req\\b[^#]*-newkey\\s+rsa:2048\\b"
+  message: "openssl req -newkey rsa:2048 — quantum-vulnerable; inventory for PQC migration."
+  cwe: [327]
+  confidence: 0.85
+
+- id: SHELL_GPG_GEN_KEY_INTERACTIVE
+  language: shell
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "GPG"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "gpg\\s+--gen-key\\b"
+  message: "gpg --gen-key (interactive) — older GnuPG versions default to weak algorithms; confirm runtime defaults."
+  cwe: [327]
+  confidence: 0.5
+
+- id: SHELL_AWS_KMS_RSA_KEYSPEC
+  language: shell
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "aws\\s+kms\\s+create-key\\b[^#]*--key-spec\\s+(?:RSA_1024|RSA_2048|RSA_3072|RSA_4096)\\b"
+  message: "aws kms create-key --key-spec RSA_* — RSA KMS key is quantum-vulnerable; 1024 is also classically weak."
+  cwe: [327]
+  confidence: 0.9

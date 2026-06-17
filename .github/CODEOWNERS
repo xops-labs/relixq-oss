@@ -1,0 +1,7 @@
+* @xops-labs/maintainers
+
+/packages/go/ @xops-labs/maintainers
+/apps/api/ @xops-labs/maintainers
+/apps/web/ @xops-labs/maintainers
+/.github/ @xops-labs/maintainers
+/docs/ @xops-labs/maintainers

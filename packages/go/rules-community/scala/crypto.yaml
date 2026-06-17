@@ -1,0 +1,214 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Scala crypto rules
+#
+# Scala runs on the JVM and inherits Java's JCA/JCE crypto API in full
+# (MessageDigest, Cipher, KeyPairGenerator, SecureRandom). On top of that the
+# ecosystem layers Scala-native crypto libraries — most notably tsec
+# (https://jmcardon.github.io/tsec/) — and framework wrappers like Akka HTTP
+# and Play. This rule pack covers all three surfaces.
+#
+# The scalaast (Tree-sitter) runner accepts these query forms:
+#   call:<Type>.<method>      — Type.method(...) or receiver.method(...)
+#   new:<Type>                — new Type(...) instance construction
+#   apply:<Type>              — Type(...) companion-apply sugar (Scala-only)
+#   import:<package.Class>    — import package.Class (also matches package._
+#                               wildcard and selector-list imports)
+#   memberref:<Type>.<member> — Type.member access NOT in call position
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that need
+# to discriminate by string literal (e.g. KeyPairGenerator.getInstance("RSA")
+# vs "DSA") stay on the regex detector until the DSL gains literal-arg support.
+
+# ---------------------------------------------------------------------------
+# JCA stdlib (Scala inherits these from Java)
+# ---------------------------------------------------------------------------
+- id: SCALA_DES_CIPHER
+  language: scala
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"(?:DES|DESede|TripleDES|3DES)[/"\\)]'
+  message: "Cipher.getInstance(\"DES...\") — DES/3DES is broken and deprecated since 2017."
+  recommendation: "Use AES-GCM (Cipher.getInstance(\"AES/GCM/NoPadding\")) or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.92
+- id: SCALA_RC4_CIPHER
+  language: scala
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"(?:RC4|ARCFOUR)"'
+  message: "Cipher.getInstance(\"RC4\") — RC4 is cryptographically broken and prohibited (RFC 7465)."
+  recommendation: "Use AES-GCM or ChaCha20-Poly1305 for stream-cipher use cases."
+  cwe: [327]
+  confidence: 0.95
+- id: SCALA_MD5_DIGEST
+  language: scala
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Mm][Dd][-]?5"'
+  message: "MessageDigest.getInstance(\"MD5\") — MD5 is cryptographically broken."
+  recommendation: "Use SHA-256 (MessageDigest.getInstance(\"SHA-256\")) or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: SCALA_SHA1_DIGEST
+  language: scala
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Ss][Hh][Aa]-?1"'
+  message: "MessageDigest.getInstance(\"SHA-1\") — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use SHA-256 or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: SCALA_WEAK_PRNG
+  language: scala
+  category: weak-prng
+  severity: high
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  # AST: `new Random(...)` in Scala calls java.util.Random — weak for security
+  # use. scala.util.Random uses java.util.Random under the hood, so flag both.
+  detector:
+    type: ast
+    query: "new:Random"
+  message: "Random is a weak PRNG (java.util.Random) and must not be used for security-sensitive values."
+  recommendation: "Use java.security.SecureRandom for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.8
+# ---------------------------------------------------------------------------
+# JCA imports (informational)
+# ---------------------------------------------------------------------------
+- id: SCALA_IMPORT_MESSAGE_DIGEST
+  language: scala
+  category: weak-hash
+  severity: info
+  algorithm: HASH
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # Informational signal — pairs with the call-site rules above to survive
+  # aliasing tricks like `import java.security.MessageDigest` followed by
+  # unqualified usage.
+  detector:
+    type: ast
+    query: "import:java.security.MessageDigest"
+  message: "import java.security.MessageDigest — JCA hashing entry point; audit MD5/SHA-1 usages."
+  recommendation: "Prefer SHA-256/SHA-3; consider a Scala wrapper like tsec.hashing for type-safety, but tsec still defers to JCA primitives."
+  cwe: [328]
+  confidence: 0.5
+# ---------------------------------------------------------------------------
+# tsec — Scala-native crypto library
+# (https://jmcardon.github.io/tsec/ — uses JCA under the hood but with typed
+#  algorithm tags. tsec does NOT yet ship PQC primitives — flag the gap.)
+# ---------------------------------------------------------------------------
+- id: SCALA_TSEC_MD5
+  language: scala
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # tsec.hashing.jca.MD5 is the type tag for MD5 — its mere reference indicates
+  # MD5 hashing intent.
+  detector:
+    type: regex
+    pattern: 'tsec\.hashing\.jca\.MD5\b'
+  message: "tsec.hashing.jca.MD5 — MD5 is cryptographically broken."
+  recommendation: "Switch to tsec.hashing.jca.SHA256 or SHA3-256."
+  cwe: [328]
+  confidence: 0.95
+- id: SCALA_TSEC_SHA1
+  language: scala
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'tsec\.hashing\.jca\.SHA1\b'
+  message: "tsec.hashing.jca.SHA1 — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Switch to tsec.hashing.jca.SHA256 or SHA3-256."
+  cwe: [328]
+  confidence: 0.95
+- id: SCALA_TSEC_DES
+  language: scala
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'tsec\.cipher\.symmetric\.jca\.(?:DES|TripleDES|DESede)\b'
+  message: "tsec.cipher.symmetric.jca.DES / TripleDES — DES family is broken and deprecated."
+  recommendation: "Use tsec.cipher.symmetric.jca.AES128GCM or AES256GCM."
+  cwe: [327]
+  confidence: 0.95
+- id: SCALA_TSEC_IMPORT_HASHING
+  language: scala
+  category: weak-hash
+  severity: info
+  algorithm: HASH
+  usage_type: hashing
+  quantum_safety: not_applicable
+  # tsec wildcard import surface — informational, complements the type-name
+  # regex rules above.
+  detector:
+    type: ast
+    query: "import:tsec.hashing.jca.*"
+  message: "import tsec.hashing.jca._ — audit for MD5 / SHA-1 type-tag usages."
+  recommendation: "Restrict imports to the specific algorithm tags you need (e.g. SHA256) so weak-hash usage is harder to introduce."
+  cwe: [328]
+  confidence: 0.4
+- id: SCALA_TSEC_IMPORT_CIPHER
+  language: scala
+  category: weak-cipher
+  severity: info
+  algorithm: CIPHER
+  usage_type: encryption
+  quantum_safety: not_applicable
+  detector:
+    type: ast
+    query: "import:tsec.cipher.symmetric.jca.*"
+  message: "import tsec.cipher.symmetric.jca._ — audit for DES / TripleDES type-tag usages."
+  recommendation: "Restrict imports to AES-GCM tags; tsec has no PQC support, so plan a path to BouncyCastle PQC for confidentiality-at-rest."
+  cwe: [327]
+  confidence: 0.4
+# ---------------------------------------------------------------------------
+# Akka HTTP / TLS configuration
+# ---------------------------------------------------------------------------
+- id: SCALA_DEPRECATED_TLS
+  language: scala
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'SSLContext\.getInstance\s*\(\s*"(?:SSLv2|SSLv3|TLS|TLSv1|TLSv1\.0|TLSv1\.1)"'
+  message: "SSLContext.getInstance(...) configures a deprecated TLS/SSL version."
+  recommendation: "Use SSLContext.getInstance(\"TLSv1.3\") and plan for hybrid PQC key-exchange (X25519+ML-KEM) once supported by the JDK or BouncyCastle TLS."
+  cwe: [326, 327]
+  confidence: 0.95

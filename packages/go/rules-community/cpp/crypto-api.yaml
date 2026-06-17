@@ -1,0 +1,80 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: CPP_OPENSSL_RSA_GENERATE_KEY
+  language: cpp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA_generate_key\\s*\\("
+  message: "RSA_generate_key — RSA is quantum-vulnerable; OpenSSL legacy RSA API."
+  cwe: [327]
+
+- id: CPP_OPENSSL_RSA_GENERATE_KEY_EX
+  language: cpp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA_generate_key_ex\\s*\\("
+  message: "RSA_generate_key_ex — RSA is quantum-vulnerable; OpenSSL legacy RSA API."
+  cwe: [327]
+
+- id: CPP_OPENSSL_EC_KEY_NEW
+  language: cpp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bEC_KEY_new_by_curve_name\\s*\\("
+  message: "EC_KEY_new_by_curve_name — classical ECC is quantum-vulnerable."
+  cwe: [327]
+
+- id: CPP_OPENSSL_RSA_PKCS1_PADDING
+  language: cpp
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA_PKCS1_PADDING\\b"
+  message: "RSA_PKCS1_PADDING constant — PKCS#1 v1.5 RSA encryption is vulnerable to Bleichenbacher oracle attacks."
+  cwe: [326, 327]
+
+- id: CPP_OPENSSL_INCLUDE_RSA_H
+  language: cpp
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "RSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "#\\s*include\\s*[<\\\"]openssl/rsa\\.h[>\\\"]"
+  message: "Includes <openssl/rsa.h> — file uses the OpenSSL legacy RSA API."
+  cwe: [327]

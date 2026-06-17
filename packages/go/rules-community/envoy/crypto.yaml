@@ -1,0 +1,132 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Envoy TLS configuration rules
+#
+# Envoy configs are YAML, so these rules ride on the existing `yaml` language
+# routing (LangYAML) and are narrowed to Envoy-shaped filenames via per-rule
+# `file_globs`. Misconfigured Envoy listeners and clusters expose the same
+# handshake-parameter class of risk as nginx/Apache (deprecated TLS versions,
+# RC4/DES cipher lists, hardcoded private keys), plus an Envoy-specific
+# certificate-pinning footgun (verify_certificate_hash bound to SHA-1 digests).
+- id: ENVOY_TLS_MIN_PROTOCOL_OLD
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*tls_minimum_protocol_version\s*:\s*"?(TLSv1_0|TLSv1_1)"?'
+    flags: i
+  message: "Envoy tls_minimum_protocol_version is pinned to TLS 1.0/1.1 (deprecated)."
+  recommendation: "Set tls_minimum_protocol_version: TLSv1_2 (or TLSv1_3 where the client population supports it)."
+  references:
+    - "https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/transport_sockets/tls/v3/common.proto"
+    - "https://datatracker.ietf.org/doc/html/rfc8996"
+  cwe: [327, 326]
+  confidence: 0.95
+- id: ENVOY_TLS_MAX_PROTOCOL_OLD
+  language: yaml
+  category: weak-tls
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*tls_maximum_protocol_version\s*:\s*"?(TLSv1_0|TLSv1_1|TLSv1_2)"?'
+    flags: i
+  message: "Envoy tls_maximum_protocol_version caps the handshake below TLS 1.3."
+  recommendation: "Remove the cap or set tls_maximum_protocol_version: TLSv1_3 so the newest mutually-supported version is negotiated."
+  cwe: [327]
+  confidence: 0.85
+- id: ENVOY_CIPHER_RC4
+  language: yaml
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '\bRC4(-MD5|-SHA)?\b'
+    flags: i
+  message: "Envoy cipher_suites references RC4."
+  recommendation: "Remove RC4 from cipher_suites. Prefer ECDHE-*-AES*-GCM-SHA* or rely on the BoringSSL default cipher list."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc7465"
+  cwe: [327]
+  confidence: 0.95
+- id: ENVOY_CIPHER_DES_3DES_MD5
+  language: yaml
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '\b(3DES|DES-CBC3|DES_CBC3|MD5)\b'
+    flags: i
+  message: "Envoy cipher_suites references DES/3DES/MD5-based suites."
+  recommendation: "Remove DES/3DES/MD5-based suites. Use AEAD (AES-GCM, ChaCha20-Poly1305)."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.9
+- id: ENVOY_ECDH_CURVE_DEPRECATED
+  language: yaml
+  category: weak-curve
+  severity: high
+  algorithm: ECDH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*-?\s*(?:ecdh_curves|curves)?\s*:?\s*"?(secp256k1|secp192r1|secp224r1|sect163k1|sect163r2|sect233k1|sect233r1)"?'
+    flags: i
+  message: "Envoy ecdh_curves contains a deprecated / non-NIST curve."
+  recommendation: "Use X25519, P-256 (secp256r1 / prime256v1), or P-384. Avoid secp256k1 (not standardized for TLS)."
+  cwe: [327]
+  confidence: 0.85
+- id: ENVOY_VERIFY_CERT_HASH_SHA1
+  language: yaml
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: integrity
+  quantum_safety: classically_broken
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*-?\s*"?[0-9a-fA-F]{40}"?\s*$'
+  message: "40-hex-char value inside an Envoy config matches a SHA-1 certificate hash (verify_certificate_hash pins to a collision-prone digest)."
+  recommendation: "Use verify_certificate_spki (SPKI SHA-256 pin) or verify_certificate_hash with SHA-256 (64 hex chars). SHA-1 pins are collision-vulnerable."
+  references:
+    - "https://shattered.io/"
+  cwe: [327, 328]
+  confidence: 0.55
+- id: ENVOY_INLINE_PRIVATE_KEY
+  language: yaml
+  category: hardcoded-key
+  severity: critical
+  algorithm: TLS
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["envoy.yaml", "envoy.yml", "envoy-*.yaml", "envoy-*.yml", "*envoy*.yaml", "*envoy*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*private_key\s*:\s*'
+  message: "Envoy private_key is configured inline — prefer private_key_provider (e.g. SDS / KMS-backed) over embedding the key in YAML."
+  recommendation: "Move the key out of the YAML: use private_key_provider (CryptoMB, QAT, or an SDS secret) so the raw key material never lands on disk in clear text."
+  references:
+    - "https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/transport_sockets/tls/v3/common.proto#extensions-transport-sockets-tls-v3-privatekeyprovider"
+  cwe: [798, 522]
+  confidence: 0.7

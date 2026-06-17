@@ -1,0 +1,187 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Swift crypto rules
+# Apple platforms expose cryptography through three primary surfaces:
+#   - CommonCrypto       (C-shim, legacy; broken hashes still ship here)
+#   - Security framework (SecKey APIs; RSA/ECC key generation)
+#   - CryptoKit          (modern Swift API; the `Insecure` namespace tags
+#                         MD5/SHA1 as Apple-flagged insecure primitives)
+#
+# The swiftast (Tree-sitter) runner accepts these query forms:
+#   call:<dotted.path>   — `Type(...)`, `Type.method(...)`, `pkg.Type.method(...)`,
+#                          or a free function such as `CC_MD5(...)`.
+#   init:<Type>          — Swift initializer call `Type(...)` (alias for
+#                          `call:Type` — Swift has no `new` keyword).
+#   import:<Module>      — `import Module` or `import Module.Submodule`
+#                          (trailing `.*` is a rule-side wildcard).
+#   memberref:<dotted>   — `Type.member` reference NOT in call position.
+#
+# Note on quantum_safety values: the canonical CryptoFinding schema defines
+# `vulnerable`, `hybrid`, `quantum_safe`, `unknown` — there is no `weak` enum
+# member. Broken classical hashes (MD5/SHA1) are tagged `vulnerable` here even
+# though the threat is pre-quantum cryptanalysis (collisions, length-extension)
+# rather than Shor's algorithm. Severity carries the nuance.
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that
+# need to discriminate string literals (e.g. `kSecAttrKeyTypeRSA` vs
+# `kSecAttrKeyTypeECSECPrimeRandom` inside an attribute dictionary) stay on
+# the regex detector.
+
+# --- CommonCrypto: broken hash free functions -------------------------------
+- id: SWIFT_CC_MD5
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:CC_MD5"
+  message: "CC_MD5(...) — MD5 is cryptographically broken (collisions trivial since 2004)."
+  recommendation: "Use CryptoKit `SHA256.hash(data:)` or `SHA3_256` for non-secret hashing; for HMAC use `HMAC<SHA256>`."
+  cwe: [328]
+  confidence: 0.97
+- id: SWIFT_CC_MD2
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: MD2
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:CC_MD2"
+  message: "CC_MD2(...) — MD2 has been broken since 1996 and is unsafe for any modern use."
+  recommendation: "Use CryptoKit `SHA256.hash(data:)`."
+  cwe: [328]
+  confidence: 0.97
+- id: SWIFT_CC_MD4
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: MD4
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:CC_MD4"
+  message: "CC_MD4(...) — MD4 is cryptographically broken (collisions in seconds)."
+  recommendation: "Use CryptoKit `SHA256.hash(data:)`."
+  cwe: [328]
+  confidence: 0.97
+- id: SWIFT_CC_SHA1
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:CC_SHA1"
+  message: "CC_SHA1(...) — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use CryptoKit `SHA256.hash(data:)` or `SHA3_256`."
+  cwe: [328]
+  confidence: 0.97
+# --- CryptoKit: Apple-flagged `Insecure` namespace --------------------------
+- id: SWIFT_INSECURE_MD5_HASH
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Insecure.MD5.hash"
+  message: "Insecure.MD5.hash(...) — Apple flags this in the `Insecure` namespace; MD5 is broken."
+  recommendation: "Use `SHA256.hash(data:)` or `SHA3_256.hash(data:)` from CryptoKit."
+  cwe: [328]
+  confidence: 0.98
+- id: SWIFT_INSECURE_MD5_INIT
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "memberref:Insecure.MD5"
+  message: "Reference to `Insecure.MD5` — Apple flags this primitive as insecure."
+  recommendation: "Switch the hasher type to CryptoKit `SHA256` or `SHA3_256`."
+  cwe: [328]
+  confidence: 0.9
+- id: SWIFT_INSECURE_SHA1_HASH
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Insecure.SHA1.hash"
+  message: "Insecure.SHA1.hash(...) — Apple flags this in the `Insecure` namespace; SHA-1 is broken."
+  recommendation: "Use `SHA256.hash(data:)` or `SHA3_256.hash(data:)` from CryptoKit."
+  cwe: [328]
+  confidence: 0.98
+- id: SWIFT_INSECURE_SHA1_REF
+  language: swift
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "memberref:Insecure.SHA1"
+  message: "Reference to `Insecure.SHA1` — Apple flags this primitive as insecure."
+  recommendation: "Switch the hasher type to CryptoKit `SHA256` or `SHA3_256`."
+  cwe: [328]
+  confidence: 0.9
+# --- CommonCrypto: symmetric cipher constants (regex; multi-symbol) --------
+- id: SWIFT_CC_ALGORITHM_DES
+  language: swift
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bkCCAlgorithmDES\b'
+  message: "kCCAlgorithmDES — single-DES has a 56-bit key and is brute-forceable."
+  recommendation: "Use AES-256-GCM (kCCAlgorithmAES with kCCKeySizeAES256) or CryptoKit `AES.GCM`."
+  cwe: [327, 326]
+  confidence: 0.95
+- id: SWIFT_CC_ALGORITHM_3DES
+  language: swift
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '\bkCCAlgorithm3DES\b'
+  message: "kCCAlgorithm3DES — 3DES is deprecated (NIST SP 800-131A) and offers ~112-bit security."
+  recommendation: "Use AES-256-GCM (kCCAlgorithmAES with kCCKeySizeAES256) or CryptoKit `AES.GCM`."
+  cwe: [327]
+  confidence: 0.95
+- id: SWIFT_CC_ALGORITHM_RC4
+  language: swift
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bkCCAlgorithmRC4\b'
+  message: "kCCAlgorithmRC4 — RC4 has known biases and is prohibited by RFC 7465."
+  recommendation: "Use AES-256-GCM (kCCAlgorithmAES with kCCKeySizeAES256) or ChaCha20-Poly1305 via CryptoKit."
+  cwe: [327]
+  confidence: 0.95

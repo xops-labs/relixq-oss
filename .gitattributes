@@ -1,0 +1,5 @@
+# Golden snapshot fixtures are compared byte-for-byte by Go tests. Pin them to
+# LF so core.autocrlf=true does not rewrite line endings on checkout and break
+# the goldens (the formatter goldens were previously un-runnable on Windows
+# checkouts for exactly this reason). They stay diffable in PRs.
+packages/go/cmd/relixq/internal/formatter/testdata/fixture.* text eol=lf

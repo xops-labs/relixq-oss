@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: BICEP_KEYVAULT_SECRET_REFERENCE
+  language: bicep
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "KMS"
+  usage_type: "key_management"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bgetSecret\\s*\\("
+  message: "Bicep uses Key Vault getSecret(...) — verify the referenced vault/key is in the inventory."
+  confidence: 0.4

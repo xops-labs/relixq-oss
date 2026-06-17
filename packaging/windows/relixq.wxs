@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Relix-Q Community Windows installer (WiX v4+ authoring; built with the
+  `wix` .NET tool in .github/workflows/release.yml).
+
+  Build inputs (preprocessor variables):
+    StageDir  - staging folder containing relixq.exe, relixq-scan-code.exe,
+                LICENSE.txt and rules\** (assembled by the workflow)
+    Version   - numeric MSI version (x.y.z, no leading "v", no prerelease)
+
+  Example:
+    wix build packaging/windows/relixq.wxs -arch x64 \
+      -d StageDir=dist/msi-stage -d Version=0.1.0 \
+      -o dist/relixq_0.1.0_windows_amd64.msi
+
+  The UpgradeCode is permanent — never change it, or upgrades will install
+  side-by-side instead of replacing the previous version.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Relix-Q Community"
+           Manufacturer="Relix-Q"
+           Version="$(var.Version)"
+           UpgradeCode="C1D036D9-3018-4D0E-97B8-535DE52B0AE2"
+           Language="1033"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Relix-Q Community is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/xops-labs/relixq-oss" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/xops-labs/relixq-oss/issues" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Relix-Q" />
+    </StandardDirectory>
+
+    <!-- Everything staged by the workflow: both binaries, LICENSE, rules\**.
+         relixq resolves relixq-scan-code and the rules\ folder relative to
+         its own location, so the install needs no configuration. -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.StageDir)\**" />
+    </ComponentGroup>
+
+    <!-- Append the install folder to the machine PATH so `relixq` works from
+         any new terminal. Removed again on uninstall (Permanent="no"). -->
+    <ComponentGroup Id="EnvComponents" Directory="INSTALLFOLDER">
+      <Component Id="PathEnvironment" Guid="8C1FB766-BF50-46EB-A16B-8993FBCC14DA">
+        <Environment Id="RelixqPath"
+                     Name="PATH"
+                     Value="[INSTALLFOLDER]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Relix-Q Community CLI">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="EnvComponents" />
+    </Feature>
+  </Package>
+</Wix>

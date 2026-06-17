@@ -1,0 +1,85 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: PERL_USE_CRYPT_CBC
+  language: perl
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "CBC"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+Crypt::CBC\\b"
+  message: "use Crypt::CBC — CBC mode lacks authentication; pair with HMAC or migrate to AEAD (GCM/Poly1305)."
+  cwe: [327]
+  confidence: 0.4
+
+- id: PERL_USE_CRYPT_RSA
+  language: perl
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+Crypt::RSA\\b"
+  message: "use Crypt::RSA — legacy RSA module; classically OK at ≥3072 bits but quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.9
+
+- id: PERL_USE_NET_SSL
+  language: perl
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "SSL"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+Net::SSL\\b"
+  message: "use Net::SSL — obsolete SSL stack (Crypt::SSLeay backend); superseded by IO::Socket::SSL."
+  cwe: [327]
+  confidence: 0.9
+
+- id: PERL_USE_NET_SSLEAY
+  language: perl
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "OpenSSL"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "use\\s+Net::SSLeay\\b"
+  message: "use Net::SSLeay — direct OpenSSL bindings; audit for manual protocol/verify configuration."
+  confidence: 0.45
+
+- id: PERL_CRYPT_RSA_WEAK_KEY
+  language: perl
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: "Crypt::RSA->new\\s*\\(\\s*[^)]*-bitsize\\s*=>\\s*(?:512|1024|2048)\\b"
+  message: "Crypt::RSA->new(-bitsize => 512|1024|2048) — small/legacy RSA modulus; 512/1024 are classically broken, 2048 is quantum-vulnerable."
+  cwe: [326, 327]
+  confidence: 0.95

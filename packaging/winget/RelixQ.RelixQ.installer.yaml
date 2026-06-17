@@ -1,0 +1,22 @@
+PackageIdentifier: RelixQ.RelixQ
+PackageVersion: 0.1.0
+InstallerType: wix
+Scope: machine
+InstallModes:
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+ProductCode: '{8AE9F50D-5319-477E-83F3-6B119471B410}'
+AppsAndFeaturesEntries:
+  - DisplayName: Relix-Q Community
+    Publisher: Relix-Q
+    DisplayVersion: 0.1.0
+    ProductCode: '{8AE9F50D-5319-477E-83F3-6B119471B410}'
+    UpgradeCode: '{C1D036D9-3018-4D0E-97B8-535DE52B0AE2}'
+    InstallerType: wix
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://relixq-website.vercel.app/downloads/relixq_0.1.0_windows_amd64.msi
+    InstallerSha256: 42F50A8C8F73FC799882A4CAC9CA8E58DDD0168BD8915C25313C09CB4392345C
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -1,0 +1,82 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: ADA_WITH_ADACRYPT
+  language: ada
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "AdaCrypt"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\bwith\\s+AdaCrypt(?:\\.[A-Za-z_][A-Za-z0-9_]*)+\\s*;"
+  message: "with AdaCrypt.*; — community crypto stack in use; review for DES/3DES/RC4/MD5/SHA-1/RSA usage."
+  confidence: 0.55
+
+- id: ADA_WITH_CRYPTO
+  language: ada
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Crypto"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\bwith\\s+Crypto(?:\\.[A-Za-z_][A-Za-z0-9_]*)+\\s*;"
+  message: "with Crypto.*; — Christoph Grein's Crypto stack in use; review for legacy primitives."
+  confidence: 0.5
+
+- id: ADA_OPENSSL_RSA_LEGACY_INTEROP
+  language: ada
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA_(?:public_encrypt|private_decrypt|sign|verify|generate_key)\\b"
+  message: "RSA_* legacy libcrypto interop call — RSA is quantum-vulnerable (Shor); legacy API also deprecated in OpenSSL 3.x."
+  cwe: [327]
+  confidence: 0.92
+
+- id: ADA_HARDCODED_RSA_KEY_SIZE_2048
+  language: ada
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\b(?:RSA_Bits|Key_Size|Key_Length|Modulus_Bits)\\s*(?::\\s*(?:constant\\s+)?(?:Natural|Integer|Positive)?\\s*)?:=\\s*2048\\b"
+  message: "Hardcoded RSA key size 2048 — meets classical guidance but is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.75
+
+- id: ADA_SPARK_MODE_OFF
+  language: ada
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "SPARK"
+  usage_type: "verification"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\bpragma\\s+SPARK_Mode\\s*\\(\\s*Off\\s*\\)"
+  message: "pragma SPARK_Mode (Off); — SPARK formal verification disabled in this unit."
+  confidence: 0.5

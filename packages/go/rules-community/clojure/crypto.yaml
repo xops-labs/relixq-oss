@@ -1,0 +1,242 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Clojure crypto rules
+#
+# Clojure runs on the JVM with full Java interop, so its cryptographic surface
+# is the union of two worlds:
+#
+#   1. JCA via Java interop — `(MessageDigest/getInstance "MD5")`,
+#      `(Cipher/getInstance "DES/ECB/...")`, `(KeyPairGenerator/getInstance
+#      "RSA")` and `(SSLContext/getInstance "TLSv1")`. These reach into
+#      java.security and javax.crypto exactly like Scala / Kotlin / Java code,
+#      but Clojure's S-expression call syntax (verb-first, slash-separated
+#      static methods) means we cannot reuse the Java/Scala regexes verbatim.
+#   2. Clojure-native libraries — `buddy-core` (the de-facto crypto toolbelt
+#      under funcool/buddy), `pandect` for hashes, and the older `clj-crypto`.
+#      These wrap JCA but expose Clojure-idiomatic APIs:
+#        (require '[buddy.core.hash :as hash])
+#        (hash/md5 "...")
+#        (buddy.core.crypto/decrypt {:alg :3des ...})
+#
+# This rule pack is regex-only. No `tree-sitter-clojure` binding exists in the
+# smacker module pinned by `go.mod` (v0.0.0-20240827094217-dd81d9e9be82), and
+# adding a CGO grammar wrapper for a Tier-2 language is not justified.
+# Regex catches the practical patterns
+# because Clojure crypto call sites are syntactically regular (always begin
+# with `(`, always have the verb immediately after).
+#
+# All rules emit RE2-compatible patterns (Go's `regexp` package), per-line.
+# Rule IDs are prefixed `CLOJURE_`.
+
+# ---------------------------------------------------------------------------
+# Clojure-native crypto library requires (informational signals — they pair
+# with the call-site rules below to survive aliasing tricks like
+# `(require '[buddy.core.hash :as h])` followed by `(h/md5 ...)`).
+# ---------------------------------------------------------------------------
+- id: CLOJURE_REQUIRE_BUDDY_HASH
+  language: clojure
+  category: weak-hash
+  severity: info
+  algorithm: HASH
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # Matches `(require [buddy.core.hash ...])`, `(require '[buddy.core.hash])`,
+  # `(:require [buddy.core.hash :as hash])` inside an `ns` form. The pattern
+  # tolerates an optional opening bracket, optional quote, and arbitrary
+  # alias/refer suffix before the closing bracket.
+  detector:
+    type: regex
+    pattern: '\(:?require\s+''?\[?buddy\.core\.hash[^]]*\]?'
+  message: "(require '[buddy.core.hash ...]) — buddy-core hash entry point; audit md5 / sha1 call sites."
+  recommendation: "Prefer SHA-256 / SHA-3 / BLAKE2 via buddy.core.hash; flag any md5 / sha1 usage."
+  cwe: [328]
+  confidence: 0.5
+- id: CLOJURE_REQUIRE_PANDECT
+  language: clojure
+  category: weak-hash
+  severity: info
+  algorithm: HASH
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # pandect (https://github.com/xsc/pandect) is the other dominant Clojure
+  # hash library. Importing it is a low-confidence signal; the call-site
+  # rules (CLOJURE_HASH_MD5 / SHA1) are where severity ratchets up.
+  detector:
+    type: regex
+    # Bare-token match; see CLOJURE_REQUIRE_BUDDY_CRYPTO for the per-line
+    # rationale. pandect's namespace prefix is unique enough that false
+    # positives are negligible.
+    pattern: '\bpandect\.'
+  message: "(require '[pandect ...]) — pandect hash library entry point; audit md5 / sha1 call sites."
+  recommendation: "Restrict to pandect.algo.sha256 or sha3-256; flag pandect.algo.md5 and pandect.algo.sha1 usage."
+  cwe: [328]
+  confidence: 0.5
+- id: CLOJURE_IMPORT_MESSAGE_DIGEST
+  language: clojure
+  category: weak-hash
+  severity: info
+  algorithm: HASH
+  usage_type: hashing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # Bare FQCN match; see CLOJURE_IMPORT_CIPHER for rationale.
+    pattern: '\bjava\.security\.MessageDigest\b'
+  message: "(:import [java.security MessageDigest]) — JCA hashing entry point; audit MD5/SHA-1 usages."
+  recommendation: "Prefer SHA-256 / SHA-3 via MessageDigest/getInstance \"SHA-256\"."
+  cwe: [328]
+  confidence: 0.5
+# ---------------------------------------------------------------------------
+# JCA via Java interop — MessageDigest/Cipher/KeyPairGenerator static method
+# call sites. Clojure invokes Java statics as `(Class/method args)`.
+# ---------------------------------------------------------------------------
+- id: CLOJURE_MESSAGEDIGEST_MD5
+  language: clojure
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\(MessageDigest/getInstance\s+"[Mm][Dd]-?5"\s*\)'
+  message: "(MessageDigest/getInstance \"MD5\") — MD5 is cryptographically broken."
+  recommendation: "Use (MessageDigest/getInstance \"SHA-256\") or a SHA-3 variant."
+  cwe: [328]
+  confidence: 0.97
+- id: CLOJURE_MESSAGEDIGEST_SHA1
+  language: clojure
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\(MessageDigest/getInstance\s+"[Ss][Hh][Aa]-?1"\s*\)'
+  message: "(MessageDigest/getInstance \"SHA-1\") — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use (MessageDigest/getInstance \"SHA-256\") or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: CLOJURE_CIPHER_DES
+  language: clojure
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Matches Cipher/getInstance with any DES / DESede / 3DES / TripleDES /
+  # RC4 / ARCFOUR algorithm string, with or without a mode/padding suffix.
+  detector:
+    type: regex
+    pattern: '\(Cipher/getInstance\s+"(?:DES|DESede|3DES|TripleDES|RC4|ARCFOUR)(?:/[^"]*)?"\s*\)'
+  message: "(Cipher/getInstance \"DES...\" / \"RC4\") — broken / deprecated symmetric cipher."
+  recommendation: "Use (Cipher/getInstance \"AES/GCM/NoPadding\") or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.92
+- id: CLOJURE_CIPHER_ECB_MODE
+  language: clojure
+  category: weak-cipher
+  severity: high
+  algorithm: ECB
+  usage_type: encryption
+  quantum_safety: vulnerable
+  # ECB mode leaks plaintext structure regardless of cipher. Match `<alg>/ECB/
+  # <padding>` strings — covers AES/ECB, DES/ECB, Blowfish/ECB, etc.
+  detector:
+    type: regex
+    pattern: '\(Cipher/getInstance\s+"\w+/ECB(?:/[^"]*)?"\s*\)'
+  message: "(Cipher/getInstance \"<alg>/ECB/...\") — ECB mode leaks plaintext structure and is unauthenticated."
+  recommendation: "Use AES/GCM/NoPadding (authenticated) or AES/CBC/PKCS5Padding with a fresh IV per message."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Clojure-native crypto call sites — buddy-core and pandect.
+# ---------------------------------------------------------------------------
+- id: CLOJURE_HASH_MD5
+  language: clojure
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Matches the two dominant idioms:
+  #   (hash/md5 ...)            — alias from `:as hash`
+  #   (buddy.core.hash/md5 ...) — fully-qualified
+  #   (pandect.algo.md5/md5 ...) — pandect fully-qualified call form
+  # The leading `(` and the `/md5` boundary keep the rule from matching
+  # arbitrary identifiers containing "md5".
+  detector:
+    type: regex
+    pattern: '\((?:[a-zA-Z0-9_.-]+/)?(?:hash/md5|md5)\b'
+  message: "(hash/md5 ...) / (md5 ...) — MD5 is cryptographically broken."
+  recommendation: "Use (hash/sha256 ...) or BLAKE2 via buddy.core.hash; pandect.algo.sha3-256 is also fine."
+  cwe: [328]
+  confidence: 0.9
+- id: CLOJURE_HASH_SHA1
+  language: clojure
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\((?:[a-zA-Z0-9_.-]+/)?(?:hash/sha1|sha1)\b'
+  message: "(hash/sha1 ...) / (sha1 ...) — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use (hash/sha256 ...) or SHA-3 via buddy.core.hash / pandect."
+  cwe: [328]
+  confidence: 0.9
+- id: CLOJURE_BUDDY_DECRYPT_WEAK_ALG
+  language: clojure
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # buddy.core.crypto/encrypt and decrypt accept an `:alg` keyword. Catching
+  # the weak set: :des, :3des, :rc4. Pattern is per-line, so the rule
+  # assumes the options map appears on the same line as the call (typical
+  # Clojure formatting for short option maps).
+  detector:
+    type: regex
+    pattern: '\(buddy\.core\.crypto/(?:encrypt|decrypt)\s+\{[^}]*:alg\s+:?(?:des|3des|rc4)\b'
+  message: "(buddy.core.crypto/decrypt {:alg :des|:3des|:rc4 ...}) — broken / deprecated symmetric cipher selected."
+  recommendation: "Switch :alg to :aes256-gcm or :chacha20-poly1305 in the options map."
+  cwe: [327]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# TLS / SSL configuration
+# ---------------------------------------------------------------------------
+- id: CLOJURE_SSL_OLD_PROTOCOL
+  language: clojure
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\(SSLContext/getInstance\s+"(?:SSL|SSLv2|SSLv3|TLS|TLSv1|TLSv1\.0|TLSv1\.1)"\s*\)'
+  message: "(SSLContext/getInstance ...) — deprecated TLS/SSL protocol version."
+  recommendation: "Use (SSLContext/getInstance \"TLSv1.3\"); plan for hybrid PQC key-exchange (X25519+ML-KEM) when the JDK or BouncyCastle TLS provider supports it."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: CLOJURE_SSLSOCKETFACTORY_DEFAULT
+  language: clojure
+  category: weak-tls
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Informational: code that accepts the JVM-default SSLSocketFactory inherits
+  # whatever protocol/cipher set the runtime ships. On older JDKs this means
+  # TLS 1.0/1.1 are silently allowed. Flag for review.
+  detector:
+    type: regex
+    pattern: '\(SSLSocketFactory/getDefault\b'
+  message: "(SSLSocketFactory/getDefault) — uses JDK-default TLS configuration; verify protocol/cipher restrictions explicitly."
+  recommendation: "Construct an SSLContext with TLSv1.3 explicitly and obtain the SocketFactory from it instead of using the default."
+  cwe: [326]
+  confidence: 0.5

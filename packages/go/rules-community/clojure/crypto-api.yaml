@@ -1,0 +1,85 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: CLOJURE_REQUIRE_BUDDY_CRYPTO
+  language: clojure
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "CIPHER"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bbuddy\\.core\\.crypto\\b"
+  message: "(require '[buddy.core.crypto ...]) — buddy-core symmetric crypto entry point; audit :alg keys for DES/3DES/RC4."
+  cwe: [327]
+  confidence: 0.5
+
+- id: CLOJURE_IMPORT_CIPHER
+  language: clojure
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "CIPHER"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bjavax\\.crypto\\.Cipher\\b"
+  message: "(:import [javax.crypto Cipher]) — JCA Cipher entry point; audit Cipher/getInstance call sites."
+  cwe: [327]
+  confidence: 0.5
+
+- id: CLOJURE_KEYPAIRGEN_RSA
+  language: clojure
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\(KeyPairGenerator/getInstance\\s+\"[Rr][Ss][Aa]\"\\s*\\)"
+  message: "(KeyPairGenerator/getInstance \"RSA\") — RSA is quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: CLOJURE_KEYPAIRGEN_DSA
+  language: clojure
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\(KeyPairGenerator/getInstance\\s+\"[Dd][Ss][Aa]\"\\s*\\)"
+  message: "(KeyPairGenerator/getInstance \"DSA\") — DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95
+
+- id: CLOJURE_RSA_KEYSIZE_1024
+  language: clojure
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\.initialize\\b[^)]*\\b1024\\b"
+  message: ".initialize 1024 — key size below NIST SP 800-131A minimum (2048); flagged as RSA-1024 when paired with KeyPairGenerator/getInstance \"RSA\"."
+  cwe: [326]
+  confidence: 0.85

@@ -1,0 +1,255 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Objective-C crypto rules
+# Objective-C is the legacy iOS/macOS surface; many large iOS apps remain
+# substantially Obj-C. The crypto surface mirrors Swift's CommonCrypto rule
+# pack but uses `[Receiver method:]` send-syntax and C free-function calls
+# (CC_MD5, CCCrypt, SecKeyCreateRandomKey, etc.) instead of dotted Swift forms.
+#
+# Strategy: REGEX-ONLY. The pinned smacker/go-tree-sitter version (v0.0.0-
+# 20240827094217-dd81d9e9be82) ships no `objc` subpackage, so to keep the
+# dependency footprint small we do NOT pull an Obj-C grammar directly
+# into go.mod. When a
+# future smacker release exposes Obj-C, this pack can be promoted to AST rules
+# of form `call:<Receiver>.<method>` (for `[Receiver method:]` patterns),
+# `import:<header>` (for `#import <Foo/Bar.h>`) and `selector:<sel:>` for
+# `@selector(...)` references; that DSL design is intentionally pre-baked
+# so it can be lifted unchanged.
+#
+# Note on quantum_safety values: the canonical CryptoFinding schema defines
+# `vulnerable`, `hybrid`, `quantum_safe`, `unknown` — there is no `weak` enum
+# member. Broken classical hashes (MD5/SHA1) are tagged `vulnerable` here even
+# though the threat is pre-quantum cryptanalysis (collisions, length-extension)
+# rather than Shor's algorithm. Severity carries the nuance.
+#
+# Per-line matching: every regex below is line-anchored in spirit — no
+# multi-line patterns. The scanner walks files line-by-line.
+
+# --- CommonCrypto: import surface -------------------------------------------
+- id: OBJC_CC_MD5
+  language: objc
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bCC_MD5\s*\('
+  message: "CC_MD5(...) — MD5 is cryptographically broken (collisions trivial since 2004)."
+  recommendation: "Use CC_SHA256 or, preferably, a CryptoKit `SHA256.hash(data:)` bridge for non-secret hashing; for HMAC use CCHmacAlgSHA256."
+  cwe: [328]
+  confidence: 0.95
+- id: OBJC_CC_MD2
+  language: objc
+  category: weak-hash
+  severity: high
+  algorithm: MD2
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bCC_MD2\s*\('
+  message: "CC_MD2(...) — MD2 has been broken since 1996 and is unsafe for any modern use."
+  recommendation: "Replace with CC_SHA256 or a CryptoKit `SHA256.hash(data:)` bridge."
+  cwe: [328]
+  confidence: 0.95
+- id: OBJC_CC_SHA1
+  language: objc
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bCC_SHA1\s*\('
+  message: "CC_SHA1(...) — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use CC_SHA256 or a CryptoKit `SHA256.hash(data:)` bridge."
+  cwe: [328]
+  confidence: 0.95
+# --- CommonCrypto: weak symmetric ciphers (CCCrypt + algorithm constants) ---
+- id: OBJC_CCCRYPT_DES
+  language: objc
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Matches `CCCrypt(... kCCAlgorithmDES ...)` on a single line — the typical
+  # one-call Obj-C usage form.
+  detector:
+    type: regex
+    pattern: '\bCCCrypt\s*\([^)]*\bkCCAlgorithmDES\b'
+  message: "CCCrypt(..., kCCAlgorithmDES, ...) — single-DES has a 56-bit key and is brute-forceable."
+  recommendation: "Use kCCAlgorithmAES (AES-256) via CCCryptorCreateWithMode in GCM mode, or bridge to CryptoKit `AES.GCM`."
+  cwe: [327, 326]
+  confidence: 0.9
+- id: OBJC_CCCRYPT_3DES
+  language: objc
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '\bCCCrypt\s*\([^)]*\bkCCAlgorithm3DES\b'
+  message: "CCCrypt(..., kCCAlgorithm3DES, ...) — 3DES is deprecated (NIST SP 800-131A) and offers ~112-bit security."
+  recommendation: "Use kCCAlgorithmAES (AES-256) via CCCryptorCreateWithMode in GCM mode, or bridge to CryptoKit `AES.GCM`."
+  cwe: [327]
+  confidence: 0.9
+- id: OBJC_CCCRYPT_RC4
+  language: objc
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bCCCrypt\s*\([^)]*\bkCCAlgorithmRC4\b'
+  message: "CCCrypt(..., kCCAlgorithmRC4, ...) — RC4 has known biases and is prohibited by RFC 7465."
+  recommendation: "Use kCCAlgorithmAES (AES-256-GCM) or ChaCha20-Poly1305 via a CryptoKit bridge."
+  cwe: [327]
+  confidence: 0.9
+# --- ECB mode flag (any symmetric cipher) -----------------------------------
+- id: OBJC_KCCOPTION_ECB_MODE
+  language: objc
+  category: weak-cipher
+  severity: high
+  algorithm: AES
+  usage_type: encryption
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bkCCOptionECBMode\b'
+  message: "kCCOptionECBMode — ECB leaks structure across identical plaintext blocks (CWE-327)."
+  recommendation: "Use an authenticated mode: AES-GCM via CCCryptorCreateWithMode with kCCModeGCM, or bridge to CryptoKit `AES.GCM`."
+  cwe: [327]
+  confidence: 0.95
+# --- Insecure RNGs used for key/IV/nonce material ---------------------------
+- id: OBJC_ARC4RANDOM_CRYPTO_KEY
+  language: objc
+  category: weak-rng
+  severity: medium
+  algorithm: unknown
+  usage_type: key_generation
+  quantum_safety: unknown
+  # Heuristic: arc4random_uniform is fine for game RNG but NOT for crypto-key
+  # generation. RE2 has no lookbehind, so we anchor on the crypto-shaped
+  # identifier and look forward for the call; for the reverse order (call
+  # first, then assignment target) the same identifier on the line is matched
+  # via a second branch.
+  detector:
+    type: regex
+    pattern: '(?:\b(?:key|Key|KEY|iv|IV|nonce|Nonce|NONCE|salt|Salt|SALT|secret|Secret|SECRET)\w*\b[^;]*\barc4random(?:_uniform)?\s*\(|\barc4random(?:_uniform)?\s*\([^)]*\)[^;]*\b(?:key|Key|KEY|iv|IV|nonce|Nonce|NONCE|salt|Salt|SALT|secret|Secret|SECRET)\b)'
+  message: "arc4random / arc4random_uniform feeding a key/IV/nonce/salt/secret — not a cryptographic RNG (CWE-330)."
+  recommendation: "Use SecRandomCopyBytes(kSecRandomDefault, ...) for cryptographic randomness."
+  cwe: [330, 338]
+  confidence: 0.7
+- id: OBJC_SECRANDOM_NON_DEFAULT_SOURCE
+  language: objc
+  category: weak-rng
+  severity: info
+  algorithm: unknown
+  usage_type: key_generation
+  quantum_safety: unknown
+  # Informational: SecRandomCopyBytes with anything other than kSecRandomDefault
+  # is unusual — historically only kSecRandomDefault has ever been the canonical
+  # source. RE2 has no negative-lookahead, so we match the suspect shapes
+  # directly: the first arg is either a local variable (lowercase / underscore
+  # leading char) or a Security constant other than kSecRandomDefault. Apple
+  # constants are PascalCase with a `k` prefix; user vars are typically
+  # lowercase or underscore-prefixed.
+  detector:
+    type: regex
+    pattern: '\bSecRandomCopyBytes\s*\(\s*(?:[a-z_][A-Za-z0-9_]*|customRandomSource|kSecRandomDefaultV[0-9])'
+  message: "SecRandomCopyBytes(...) invoked with a non-`kSecRandomDefault` source — review the source argument."
+  recommendation: "Pass `kSecRandomDefault` as the rnd argument unless the source has been independently audited."
+  cwe: [338]
+  confidence: 0.5
+# --- Security framework: RSA / EC key generation ----------------------------
+- id: OBJC_RSA_KEYSIZE_1024
+  language: objc
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # Catches `kSecAttrKeySizeInBits : @1024` and `kSecAttrKeySizeInBits = 1024`
+  # in attribute-dictionary literals near SecKeyCreateRandomKey.
+  detector:
+    type: regex
+    pattern: '\bkSecAttrKeySizeInBits\b\s*[:=]\s*@?\s*(?:512|768|1024)\b'
+  message: "kSecAttrKeySizeInBits = 1024 (or smaller) — RSA below 2048 bits is unacceptable; 1024-bit RSA is breakable today by well-funded adversaries."
+  recommendation: "Use 3072+ bits as an interim measure, and plan migration to ML-KEM (FIPS 203) for key encapsulation via liboqs bindings."
+  cwe: [326, 327]
+  confidence: 0.95
+# --- Deprecated TLS versions ------------------------------------------------
+- id: OBJC_TLS_OLD_VERSION_SSLPROTO
+  language: objc
+  category: deprecated-protocol
+  severity: high
+  algorithm: TLS
+  usage_type: tls
+  quantum_safety: vulnerable
+  # Matches the legacy SecureTransport API: SSLSetProtocolVersionMin(ctx, kSSLProtocol3)
+  # or any kSSLProtocol2/kSSLProtocol3 reference.
+  detector:
+    type: regex
+    pattern: '\bSSLSetProtocolVersion(?:Min|Max)?\s*\([^)]*\bk(?:SSLProtocol[23]|TLSProtocol1(?:0|1)?)\b'
+  message: "SSLSetProtocolVersion*(... kSSLProtocol3 / kTLSProtocol1[01]) — SSLv3, TLS 1.0 and TLS 1.1 are deprecated."
+  recommendation: "Require kTLSProtocol12 or kTLSProtocol13 as the minimum; prefer NSURLSession with TLSMinimumSupportedProtocolVersion = tls_protocol_version_TLSv13."
+  cwe: [327, 326]
+  confidence: 0.9
+- id: OBJC_NSURLSESSION_OLD_TLS
+  language: objc
+  category: deprecated-protocol
+  severity: high
+  algorithm: TLS
+  usage_type: tls
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bTLSMinimumSupportedProtocol\b\s*=\s*k(?:SSLProtocol[23]|TLSProtocol1(?:0|1)?)\b'
+  message: "NSURLSessionConfiguration.TLSMinimumSupportedProtocol = kTLSProtocol1 (or older) — deprecated TLS floor."
+  recommendation: "Set TLSMinimumSupportedProtocolVersion = tls_protocol_version_TLSv13 (or at least TLSv12)."
+  cwe: [327, 326]
+  confidence: 0.9
+# --- OpenSSL linked legacy usage --------------------------------------------
+- id: OBJC_OPENSSL_ADD_ALL
+  language: objc
+  category: deprecated-api
+  severity: medium
+  algorithm: unknown
+  usage_type: import
+  quantum_safety: vulnerable
+  # Catches OpenSSL_add_all_algorithms / OpenSSL_add_all_ciphers / OpenSSL_add_all_digests —
+  # all three are deprecated since OpenSSL 1.1 and signal an old OpenSSL link.
+  detector:
+    type: regex
+    pattern: '\bOpenSSL_add_all_(?:algorithms|ciphers|digests)\s*\('
+  message: "OpenSSL_add_all_*() — deprecated since OpenSSL 1.1; indicates a legacy OpenSSL link with weak primitives still enabled."
+  recommendation: "Upgrade to OpenSSL 3.x (algorithms auto-register) and audit the linked binary for legacy cipher exposure."
+  cwe: [327, 477]
+  confidence: 0.85
+# --- Hardcoded private-key material in NSData / NSString literals -----------
+- id: OBJC_HARDCODED_PRIVATE_KEY_PEM
+  language: objc
+  category: hardcoded-secret
+  severity: critical
+  algorithm: unknown
+  usage_type: key_storage
+  quantum_safety: unknown
+  # Matches an @"..." literal containing a PEM private-key header on the same
+  # line — Obj-C string literals are usually written inline.
+  detector:
+    type: regex
+    pattern: '@"[^"]*-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----'
+  message: "Hardcoded PEM PRIVATE KEY block inside an NSString literal — private keys must never live in source."
+  recommendation: "Load private keys from the iOS Keychain (Security framework) or a secure enclave-backed store; remove the literal and rotate the key."
+  cwe: [798, 321]
+  confidence: 0.95

@@ -1,0 +1,163 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: KOTLIN_RSA_KEYGEN
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "KeyPairGenerator\\.getInstance\\s*\\(\\s*\"[Rr][Ss][Aa]\""
+  message: "KeyPairGenerator.getInstance(\"RSA\") — RSA is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95
+
+- id: KOTLIN_DSA_KEYGEN
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "KeyPairGenerator\\.getInstance\\s*\\(\\s*\"[Dd][Ss][Aa]\""
+  message: "KeyPairGenerator.getInstance(\"DSA\") — DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95
+
+- id: KOTLIN_EC_KEYGEN
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "KeyPairGenerator\\.getInstance\\s*\\(\\s*\"[Ee][Cc]\""
+  message: "KeyPairGenerator.getInstance(\"EC\") — classical ECC is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95
+
+- id: KOTLIN_RSA_PKCS1_PADDING
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "Cipher\\.getInstance\\s*\\(\\s*\"RSA/ECB/PKCS1Padding\""
+  message: "Cipher.getInstance(\"RSA/ECB/PKCS1Padding\") — PKCS#1 v1.5 RSA encryption is vulnerable to Bleichenbacher oracle attacks."
+  cwe: [326, 327]
+  confidence: 0.97
+
+- id: KOTLIN_IMPORT_MESSAGE_DIGEST
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "hashing"
+  usage_type: "hashing"
+  quantum_safety: not_applicable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+java\\.security\\.MessageDigest\\b"
+  message: "import java.security.MessageDigest — hashing API in use; review algorithm choice."
+
+- id: KOTLIN_IMPORT_CIPHER
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "encryption"
+  usage_type: "encryption"
+  quantum_safety: not_applicable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+javax\\.crypto\\.Cipher\\b"
+  message: "import javax.crypto.Cipher — symmetric cipher API in use; review algorithm choice."
+
+- id: KOTLIN_IMPORT_KEY_PAIR_GENERATOR
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "asymmetric"
+  usage_type: "key_generation"
+  quantum_safety: not_applicable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+java\\.security\\.KeyPairGenerator\\b"
+  message: "import java.security.KeyPairGenerator — asymmetric key generation API in use; verify the algorithm parameter."
+
+- id: KOTLIN_ANDROID_KEYSTORE_RSA_SHORT_KEY
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "setKeySize\\s*\\(\\s*(?:512|768|1024|1536|2047)\\s*\\)"
+  message: "KeyGenParameterSpec.Builder.setKeySize(<2048) — RSA keys below 2048 bits are no longer considered safe (NIST SP 800-131A)."
+  cwe: [326]
+  confidence: 0.9
+
+- id: KOTLIN_ANDROID_KEYSTORE_BUILDER_IMPORT
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "asymmetric"
+  usage_type: "key_generation"
+  quantum_safety: not_applicable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+android\\.security\\.keystore\\.KeyGenParameterSpec\\b"
+  message: "import android.security.keystore.KeyGenParameterSpec — Android Keystore key generation in use; review digest and key-size choices."
+
+- id: KOTLIN_BC_RSA_PRIVATE_KEY_IMPORT
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+org\\.bouncycastle\\.jcajce\\.provider\\.asymmetric\\.rsa\\.BCRSAPrivateKey\\b"
+  message: "import BouncyCastle BCRSAPrivateKey — RSA usage via the BC provider; quantum-vulnerable."
+
+- id: KOTLIN_BC_PROVIDER_WILDCARD_IMPORT
+  language: kotlin
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "provider"
+  usage_type: "key_generation"
+  quantum_safety: not_applicable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+org\\.bouncycastle\\.jce\\.provider\\."
+  message: "Wildcard import of BouncyCastle JCE provider — verify which BC algorithms are actually in use."

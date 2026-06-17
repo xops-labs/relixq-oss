@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RelixQ.OssApi</RootNamespace>
+    <AssemblyName>RelixQ.OssApi</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Local dev convenience: run the net8.0 build on a newer runtime when the
+         exact 8.0 runtime is absent. In the Docker image the aspnet:8.0 base has
+         the exact runtime, so this is a no-op there. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../packages/dotnet/RelixQ.Contracts/RelixQ.Contracts.csproj" />
+    <ProjectReference Include="../../packages/dotnet/RelixQ.Scoring/RelixQ.Scoring.csproj" />
+    <ProjectReference Include="../../packages/dotnet/RelixQ.Auth.Local/RelixQ.Auth.Local.csproj" />
+  </ItemGroup>
+
+</Project>

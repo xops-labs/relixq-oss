@@ -1,0 +1,154 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: RUBY_OPENSSL_CIPHER_NEW_GENERIC
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: low
+  algorithm: "SymmetricCipher"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOpenSSL::Cipher\\.new\\s*\\("
+  message: "OpenSSL::Cipher.new(...) — review cipher choice."
+  cwe: [327]
+
+- id: RUBY_OPENSSL_RSA_NEW
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOpenSSL::PKey::RSA\\.new\\b"
+  message: "OpenSSL::PKey::RSA.new(...) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUBY_OPENSSL_RSA_NEW_1024
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: "OpenSSL::PKey::RSA\\.new\\s*\\(\\s*1024\\b"
+  message: "OpenSSL::PKey::RSA.new(1024) — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  cwe: [326, 327]
+  confidence: 0.95
+
+- id: RUBY_OPENSSL_RSA_NEW_2048
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: "OpenSSL::PKey::RSA\\.new\\s*\\(\\s*2048\\b"
+  message: "OpenSSL::PKey::RSA.new(2048) — meets classical guidance but is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.85
+
+- id: RUBY_OPENSSL_DSA_NEW
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOpenSSL::PKey::DSA\\.new\\b"
+  message: "OpenSSL::PKey::DSA.new(...) — DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable."
+  cwe: [327]
+
+- id: RUBY_OPENSSL_EC_NEW
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOpenSSL::PKey::EC\\.new\\b"
+  message: "OpenSSL::PKey::EC.new(...) — classical elliptic-curve crypto is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUBY_OPENSSL_EC_WEAK_CURVE
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "OpenSSL::PKey::EC\\.new\\s*\\(\\s*[\"'](?:prime256v1|secp256k1|secp192r1|secp224r1)[\"']"
+  message: "OpenSSL::PKey::EC.new(\"<curve>\") — classical EC curve, quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.88
+
+- id: RUBY_REQUIRE_OPENSSL
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "OpenSSL"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brequire\\b[^\\n]*['\\\"]openssl['\\\"]"
+  message: "`require 'openssl'` — OpenSSL stdlib in use; review for quantum-vulnerable primitives."
+
+- id: RUBY_RAILS_MESSAGE_ENCRYPTOR
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "AES"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bActiveSupport::MessageEncryptor\\.new\\b"
+  message: "ActiveSupport::MessageEncryptor.new(...) — verify key length (≥32 bytes) and cipher (`aes-256-gcm`)."
+  cwe: [326]
+
+- id: RUBY_RAILS_MESSAGE_VERIFIER
+  language: ruby
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "HMAC"
+  usage_type: "mac"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bActiveSupport::MessageVerifier\\b"
+  message: "ActiveSupport::MessageVerifier referenced — verify HMAC digest (SHA-256 or stronger)."
+  cwe: [328]

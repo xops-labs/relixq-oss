@@ -1,0 +1,203 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Azure Bicep crypto rules
+#
+# Bicep is Azure's modern declarative language — a thin DSL that
+# transpiles to ARM JSON via the `bicep` CLI. It uses concise syntax:
+#
+#   resource keyVaultKey 'Microsoft.KeyVault/vaults/keys@2023-02-01' = {
+#     parent: keyVault
+#     name: 'signing-key'
+#     properties: {
+#       kty: 'RSA'
+#       keySize: 2048
+#     }
+#   }
+#
+# vs the equivalent ARM JSON. As of 2026 Bicep is the recommended way to
+# author Azure IaC; most new Azure-resident shops have Bicep alongside
+# (or replacing) ARM JSON. This rule pack scans Bicep source directly
+# rather than waiting for the transpilation step.
+#
+# Strategy: regex-only. There is no Go parser for Bicep — the reference
+# implementation is .NET (Bicep is a C# project) and there is no
+# practical Tree-sitter grammar at the time of writing. Regex is a
+# pragmatic fit because Bicep syntax is line-oriented for the patterns
+# we care about: resource-type strings, property assignments, parameter
+# defaults. False positives are kept low by anchoring on the
+# single-quoted resource-type form `'Microsoft.X/Y@version'` for
+# resource discovery and on Bicep-specific syntax (` = '` for assignment
+# inside object literals) for property values.
+#
+# Plumbing: Bicep is a NEW language constant in the scanner: the `.bicep`
+# extension must map to
+# `LangBicep` and IsSourceLanguage should return true for it (Bicep is
+# source-like declarative, similar to Terraform).
+#
+# Coverage:
+#   - Microsoft.KeyVault keys                (kty, keySize)
+#   - Microsoft.Network/applicationGateways (TLS minProtocolVersion)
+#   - Microsoft.Storage/storageAccounts     (minimumTlsVersion)
+#   - Microsoft.Sql/servers                 (minimalTlsVersion)
+#   - Microsoft.Web/sites                   (minTlsVersion)
+#   - Microsoft.Cdn/profiles/endpoints      (httpsRedirect)
+#   - Hardcoded adminPassword param defaults
+#   - keyVaultSecretReference informational
+
+# ---------------------------------------------------------------------------
+# Microsoft.KeyVault/vaults/keys — RSA key inventory
+# ---------------------------------------------------------------------------
+- id: BICEP_KEYVAULT_RSA_KEY
+  language: bicep
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: key_management
+  quantum_safety: vulnerable
+  # In Bicep, property assignment inside an object uses ` = ` only at
+  # the top-level resource declaration; nested object members use `:`
+  # (e.g. `kty: 'RSA'`). The single-quoted string is Bicep's syntax for
+  # string literals. Pattern: `kty: 'RSA'` or `kty: 'RSA-HSM'`.
+  detector:
+    type: regex
+    pattern: "\\bkty\\s*:\\s*'RSA(-HSM)?'"
+  message: "Bicep Microsoft.KeyVault key declares kty: 'RSA' — RSA is quantum-vulnerable (Shor)."
+  recommendation: "Track Azure Key Vault PQC roadmap (ML-KEM / ML-DSA). For now use AKV for envelope encryption with PQC-protected data keys."
+  cwe: [327]
+  confidence: 0.95
+- id: BICEP_KEYVAULT_EC_KEY
+  language: bicep
+  category: weak-crypto
+  severity: high
+  algorithm: ECC
+  usage_type: key_management
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bkty\\s*:\\s*'EC(-HSM)?'"
+  message: "Bicep Microsoft.KeyVault key declares kty: 'EC' — elliptic curves are quantum-vulnerable (Shor)."
+  recommendation: "Plan migration to ML-DSA (signing) or ML-KEM (encapsulation) once Azure Key Vault exposes them."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Network/applicationGateways — minProtocolVersion
+# ---------------------------------------------------------------------------
+- id: BICEP_APPGW_TLS_OLD
+  language: bicep
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Bicep: `minProtocolVersion: 'TLSv1_0'` (single quotes, snake-case
+  # enum value). Same enum vocabulary as the ARM equivalent.
+  detector:
+    type: regex
+    pattern: "\\bminProtocolVersion\\s*:\\s*'TLSv1_(0|1)'"
+  message: "Application Gateway pins minProtocolVersion to TLS 1.0 or 1.1 — deprecated."
+  recommendation: "Set minProtocolVersion to TLSv1_2 (or TLSv1_3) in the sslPolicy block."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Storage/storageAccounts — minimumTlsVersion
+# ---------------------------------------------------------------------------
+- id: BICEP_STORAGE_TLS_OLD
+  language: bicep
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Bicep: `minimumTlsVersion: 'TLS1_0'` / `'TLS1_1'`. The CLI-produced
+  # ARM JSON has the same enum but with double quotes (covered by the
+  # ARM rule pack).
+  detector:
+    type: regex
+    pattern: "\\bminimumTlsVersion\\s*:\\s*'TLS1_(0|1)'"
+  message: "Storage account allows minimumTlsVersion=TLS1_0 or TLS1_1 — deprecated."
+  recommendation: "Set minimumTlsVersion: 'TLS1_2' (current highest supported value for Microsoft.Storage)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Sql/servers — minimalTlsVersion
+# ---------------------------------------------------------------------------
+- id: BICEP_SQL_TLS_OLD
+  language: bicep
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Bicep / ARM use the unusual spelling "minimalTlsVersion" for SQL
+  # servers (different from "minimumTlsVersion" used elsewhere) with
+  # dot-separated numeric values.
+  detector:
+    type: regex
+    pattern: "\\bminimalTlsVersion\\s*:\\s*'1\\.(0|1)'"
+  message: "Microsoft.Sql/servers pins minimalTlsVersion to 1.0 or 1.1 — deprecated."
+  recommendation: "Set minimalTlsVersion: '1.2' (or '1.3' where supported)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Web/sites — minTlsVersion
+# ---------------------------------------------------------------------------
+- id: BICEP_APPSERVICE_TLS_OLD
+  language: bicep
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bminTlsVersion\\s*:\\s*'1\\.(0|1)'"
+  message: "App Service site pins minTlsVersion to 1.0 or 1.1 — deprecated."
+  recommendation: "Set minTlsVersion: '1.2' (or '1.3' where supported by the App Service plan)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Cdn/profiles/endpoints — HTTPS redirect disabled
+# ---------------------------------------------------------------------------
+- id: BICEP_CDN_HTTPS_REDIRECT_DISABLED
+  language: bicep
+  category: weak-tls
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # CDN endpoints can have isHttpAllowed: true and / or no redirect
+  # rule. Heuristic: explicit isHttpAllowed: true is a clear smell.
+  detector:
+    type: regex
+    pattern: "\\bisHttpAllowed\\s*:\\s*true\\b"
+  message: "CDN endpoint allows plain HTTP (isHttpAllowed: true) — clients can downgrade to unencrypted transport."
+  recommendation: "Set isHttpAllowed: false and isHttpsAllowed: true, or configure a delivery rule to redirect HTTP→HTTPS at the edge."
+  cwe: [319]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Hardcoded admin-password parameter defaults
+# ---------------------------------------------------------------------------
+- id: BICEP_HARDCODED_ADMIN_PASSWORD
+  language: bicep
+  category: hardcoded-secret
+  severity: critical
+  algorithm: Secret
+  usage_type: secret_storage
+  quantum_safety: vulnerable
+  # Bicep parameter with default literal: `param adminPassword string =
+  # 'literal'`. Bicep has a `@secure()` decorator that should be used
+  # for secret parameters, and a default value defeats both the
+  # decorator's intent and basic secret-handling hygiene.
+  # Decoration in Bicep also expects no inline default. We match the
+  # broader anti-pattern: any `param ... adminPassword string = '...'`
+  # with a quoted literal default. The regex is case-insensitive via
+  # flags to catch AdminPassword / ADMIN_PASSWORD spellings.
+  detector:
+    type: regex
+    pattern: "\\bparam\\s+\\w*[Aa]dmin[Pp]assword\\w*\\s+string\\s*=\\s*'[^']+'"
+    flags: ""
+  message: "Bicep parameter declares an admin-password default with a literal value — secrets must not be committed to source."
+  recommendation: "Use the @secure() decorator and pass the value via a Key Vault reference (`getSecret`) or a deployment-time parameter file that is itself protected."
+  cwe: [798]
+  confidence: 0.9

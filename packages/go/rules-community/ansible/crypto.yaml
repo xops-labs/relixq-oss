@@ -1,0 +1,119 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Ansible crypto rule pack.
+# IMPORTANT: regex matches are PER-LINE (see internal/detectors/regex/regex.go),
+# so we cannot anchor parameter values to their parent module name across lines.
+# Instead each rule fires on a single distinctive line; the module-presence
+# rule (ANSIBLE_OPENSSL_MODULE_USAGE) plus the parameter-value rules co-locate
+# in findings UIs by file + nearby line numbers.
+# Globs are basename-style (filepath.Match does not support `**`).
+- id: ANSIBLE_OPENSSL_KEY_TYPE_DSA
+  language: yaml
+  category: weak-algorithm
+  severity: critical
+  algorithm: DSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*type:\s*[''"]?(DSA|dsa)[''"]?\s*$'
+  message: "Ansible key task uses DSA — broken / deprecated."
+  recommendation: "Use type: RSA (size >= 3072), type: ECDSA, or type: ed25519."
+  cwe: [327]
+  confidence: 0.85
+- id: ANSIBLE_X509_DIGEST_SHA1
+  language: yaml
+  category: weak-hash
+  severity: medium
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*digest:\s*[''"]?sha1[''"]?\s*$'
+    flags: i
+  message: "Ansible x509_certificate / openssl_csr signs with SHA-1 (deprecated)."
+  recommendation: "Set digest: sha256 (or sha384/sha512)."
+  cwe: [328]
+  confidence: 0.85
+- id: ANSIBLE_X509_DIGEST_MD5
+  language: yaml
+  category: weak-hash
+  severity: critical
+  algorithm: MD5
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*digest:\s*[''"]?md5[''"]?\s*$'
+    flags: i
+  message: "Ansible x509_certificate / openssl_csr signs with MD5 — collisions are trivial."
+  recommendation: "Use digest: sha256 minimum."
+  cwe: [328]
+  confidence: 0.95
+- id: ANSIBLE_X509_SKI_SHA1
+  language: yaml
+  category: weak-hash
+  severity: info
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*subject_key_identifier_algorithm:\s*[''"]?sha1[''"]?\s*$'
+    flags: i
+  message: "Ansible x509_certificate uses SHA-1 for Subject Key Identifier (informational)."
+  recommendation: "Use sha256 for the SKI hash."
+  cwe: [328]
+  confidence: 0.7
+- id: ANSIBLE_LEGACY_OPENSSL_MODULE
+  language: yaml
+  category: deprecated-api
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*ansible\.builtin\.(openssl_csr|openssl_privatekey|openssl_certificate|openssl_dhparam):\s*$'
+  message: "Ansible playbook uses the legacy ansible.builtin.openssl_* module path (deprecated; moved to community.crypto)."
+  recommendation: "Switch to community.crypto.* and pin the collection version."
+  confidence: 0.8
+- id: ANSIBLE_SHELL_OPENSSL_GENRSA_WEAK
+  language: yaml
+  category: weak-key-size
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '\bopenssl\s+genrsa\b[^\n]*\b(512|1024)\b'
+  message: "Ansible shell/command task shells out to `openssl genrsa` with a weak modulus (<=1024)."
+  recommendation: "Replace the shell call with community.crypto.openssl_privatekey size: 3072+ for idempotency and stronger keys."
+  cwe: [326]
+  confidence: 0.9
+- id: ANSIBLE_USER_PASSWORD_LITERAL
+  language: yaml
+  category: hardcoded-secret
+  severity: info
+  algorithm: PASSWORD
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*(ansible_(user_)?password|ansible_become_password|ansible_ssh_pass):\s*[''"][^''"$\{][^''"\n]{2,}[''"]'
+  message: "Ansible inventory/vars hardcodes a password literal (consider ansible-vault or external secrets)."
+  recommendation: "Store credentials in ansible-vault or an external secret store; reference via {{ vault_var }} or lookup plugins."
+  cwe: [798]
+  confidence: 0.6

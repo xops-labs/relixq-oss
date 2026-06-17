@@ -1,0 +1,11 @@
+{
+  "name": "corpus-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "node-rsa": "^1.1.1",
+    "elliptic": "^6.5.5",
+    "express": "^4.19.0"
+  }
+}

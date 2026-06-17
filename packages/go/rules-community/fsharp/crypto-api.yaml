@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: FSHARP_OPEN_BCL_CRYPTO
+  language: fsharp
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "ClassicalCrypto"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "open\\s+System\\.Security\\.Cryptography\\b"
+  message: "`open System.Security.Cryptography` — review all crypto call sites in this F# file for PQC readiness."
+  confidence: 0.4

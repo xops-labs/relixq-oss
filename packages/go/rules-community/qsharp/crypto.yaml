@@ -1,0 +1,119 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Q# crypto rules
+# Q# is Microsoft's quantum DSL (Quantum Development Kit). For a PQC scanner
+# the value here is mostly *vertical-narrative* — Q# code is, by definition,
+# proximate to quantum-algorithm research and educational Shor/Grover
+# implementations. The classical-crypto leakage surface is small and lives in
+# three places:
+#   1. The classical .NET interop layer (Q# can call into BCL System.Security
+#      .Cryptography via host-program callbacks / EntryPoint attributes).
+#   2. Educational implementations of Shor / Period-finding / Grover where the
+#      *input* parameters expose hardcoded RSA-shaped moduli or unsafe seed
+#      handling. These are not exploitable, but they are excellent inventory
+#      signals for "this codebase is exploring quantum attacks on classical
+#      crypto."
+#   3. The Microsoft.Quantum.Random / Microsoft.Quantum.Crypto namespaces, which
+#      ship a few primitives whose classical post-processing can be misused.
+#
+# Q# AST tooling status (2026-05):
+#   - No `tree-sitter-qsharp` grammar exists in smacker/go-tree-sitter.
+#   - The microsoft/qsharp compiler is .NET-hosted and does not expose a clean
+#     standalone JSONL analyzer CLI suitable for the subprocess pattern used by
+#     the C# Roslyn runner.
+# We therefore ship regex-only rules for Q#. AST polish can come later once a
+# grammar or analyzer surfaces — the rule semantics here translate cleanly to
+# AST queries when that day comes.
+#
+# Rule-ID prefix: QSHARP_
+
+# ---------------------------------------------------------------------------
+# Classical crypto interop — `open` statements pulling in legacy primitives
+# ---------------------------------------------------------------------------
+- id: QSHARP_WEAK_RNG_SEED
+  language: qsharp
+  category: weak-rng
+  severity: high
+  algorithm: PRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `DrawRandomInt(min, max)` and `DrawRandomDouble(min, max)` in
+  # Microsoft.Quantum.Random use the classical host RNG. A hardcoded seed
+  # passed via a wrapper or a literal `0` / `1` / `42` upper-bound collapses
+  # the entropy of any classical post-processing step.
+  detector:
+    type: regex
+    pattern: '(?i)\bDrawRandom(?:Int|Double|Bool)\s*\(\s*(?:0\s*,\s*1\b|[0-9]+\s*,\s*(?:0|1|42)\b)'
+  message: "DrawRandomInt/Double/Bool(...) with suspect bounds (e.g. 0,1 or hardcoded literal) — classical RNG with collapsed entropy."
+  recommendation: "Use Microsoft.Quantum.Random.DrawRandomInt with full natural range and route classical-side randomness through a CSPRNG (System.Security.Cryptography.RandomNumberGenerator) on the host."
+  cwe: [338, 330]
+  confidence: 0.7
+- id: QSHARP_RANDOM_NAMESPACE_USAGE
+  language: qsharp
+  category: weak-rng
+  severity: info
+  algorithm: PRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?m)^\s*open\s+Microsoft\.Quantum\.Random\s*;'
+  message: "`open Microsoft.Quantum.Random` — review all DrawRandom* call sites for CSPRNG suitability."
+  recommendation: "Quantum-measurement randomness is fine for sampling but should NOT seed classical key material; route key randomness through System.Security.Cryptography.RandomNumberGenerator on the host."
+  cwe: [338]
+  confidence: 0.4
+# ---------------------------------------------------------------------------
+# Classical hash function references — MD5 / SHA1 in diagnostics / interop
+# ---------------------------------------------------------------------------
+- id: QSHARP_HOST_MD5_REFERENCE
+  language: qsharp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `MD5.Create()` or `MD5CryptoServiceProvider` strings appearing inside a
+  # Q# Message / Diagnostics call — typically interop or instrumentation glue
+  # naming the algorithm.
+  detector:
+    type: regex
+    pattern: '(?i)\b(?:MD5(?:CryptoServiceProvider)?|MD5\.Create)\b'
+  message: "MD5 reference in Q# source — MD5 is cryptographically broken."
+  recommendation: "Replace with SHA-256 / SHA-3 on the host side; do not surface MD5 algorithm identifiers from Q# diagnostics."
+  cwe: [328]
+  confidence: 0.85
+- id: QSHARP_HOST_SHA1_REFERENCE
+  language: qsharp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '(?i)\b(?:SHA1(?:CryptoServiceProvider|Managed)?|SHA1\.Create)\b'
+  message: "SHA-1 reference in Q# source — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Replace with SHA-256 / SHA-3 on the host side."
+  cwe: [328]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Legacy hash names in Microsoft.Quantum.Diagnostics
+# ---------------------------------------------------------------------------
+- id: QSHARP_DIAGNOSTICS_WEAK_HASH
+  language: qsharp
+  category: weak-hash
+  severity: medium
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Pattern: AssertEqualOnZeroState / DumpMachine identifiers paired with MD5/SHA1
+  # algorithm names inside Diagnostics blocks. Indicates a classical hash being
+  # used to fingerprint state — review.
+  detector:
+    type: regex
+    pattern: '(?i)(?:DumpMachine|DumpRegister|AssertEqualOnZeroState)\s*\([^)]*(?:MD5|SHA1|MD4)\b'
+  message: "Q# Diagnostics fingerprinting state via legacy hash (MD5/SHA1/MD4)."
+  recommendation: "Use SHA-256 / SHA-3 fingerprints for Q# state diagnostics."
+  cwe: [328]
+  confidence: 0.7

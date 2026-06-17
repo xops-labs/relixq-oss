@@ -1,0 +1,300 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Constant-fingerprint rule pack (language: any — the dispatcher routes these
+# to every scanned file). Each rule matches a magic constant that essentially
+# only occurs in a cryptographic IMPLEMENTATION (S-boxes, round constants,
+# IVs, curve/group primes) — the signature of hand-rolled crypto that has no
+# library import to match.
+#
+# Confidence model:
+#   - Single ambiguous constants (a bare 65537, the 121665 Curve25519 a24)
+#     are LOW confidence and LOW severity. They are promotion fuel: the
+#     file-level multi-signal pass in scanner/promote.go fuses >=2 distinct
+#     agreeing signals into one high-severity HANDROLLED_<ALG>_PROMOTED
+#     finding (Bayesian 1 - prod(1 - c_i), same form as package fusion).
+#   - Unmistakable fingerprints (multi-constant sequences as they appear on
+#     one source line, full-prime hex fragments) carry high confidence on
+#     their own; the RFC 3526 MODP prime and the secp256k1 prime also carry
+#     high severity because the constant IS the algorithm.
+#
+# Known accepted FP surface (low severity by design):
+#   - These rules match their own YAML examples when a checkout of this repo
+#     is scanned, and may fire on crypto test vectors or vendored reference
+#     implementations. The walker's vendored-dir policy and the low single
+#     confidence keep the noise floor acceptable.
+#   - CRYPTO_FP_CHACHA_SIGMA ("expand 32-byte k") is deliberately OMITTED:
+#     ChaCha20 is 256-bit and Grover-resistant, and this pack stays
+#     risk-focused.
+
+- id: CRYPTO_FP_RSA_PUBLIC_EXPONENT
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "RSA"
+  usage_type: "implementation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # Anchored to an assignment / argument position to reduce noise from
+    # arbitrary numeric data; 65537 == 0x10001 == F4, the universal RSA
+    # public exponent.
+    pattern: '(=|:=|,|\()\s*(65537|0x10001)\b'
+  message: "RSA public exponent constant (65537 / 0x10001) — weak single fingerprint of an RSA implementation or key construction. Corroboration may promote this to a hand-rolled-crypto finding."
+  recommendation: "If this is RSA, replace hand-rolled or direct RSA use with a vetted library and plan migration to ML-KEM (FIPS 203) / ML-DSA (FIPS 204)."
+  cwe: [327]
+  confidence: 0.35
+  examples:
+    match:
+      - "e = 65537"
+      - "public_exponent=65537, key_size=2048"
+      - "exp := 0x10001"
+      - "BigInteger.valueOf(65537)"
+    no_match:
+      - "port = 65538"
+      - "x = 165537"
+      - "offset = 655370"
+      - "timeout 65537"
+
+- id: CRYPTO_FP_AES_SBOX
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "AES"
+  usage_type: "implementation"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    # First four bytes of the AES forward S-box in table order. The 4-byte
+    # run on a single line is unmistakable — it appears in no other context.
+    pattern: '0x63\s*,\s*0x7c\s*,\s*0x77\s*,\s*0x7b\b'
+    flags: i
+  message: "AES forward S-box table detected (0x63,0x7c,0x77,0x7b…) — hand-rolled AES implementation. Key size unknown, so Grover weakening is assumed."
+  recommendation: "Replace hand-rolled AES with a vetted library (AES-256-GCM) — side-channel-safe S-box handling is notoriously hard to get right."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - "0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,"
+      - "0x63,0x7C,0x77,0x7B,"
+    no_match:
+      - "0x63, 0x7c, 0x78, 0x7b,"
+      - "sbox = build_forward_table()"
+
+- id: CRYPTO_FP_AES_INV_SBOX
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "AES"
+  usage_type: "implementation"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    # First four bytes of the AES inverse S-box in table order.
+    pattern: '0x52\s*,\s*0x09\s*,\s*0x6a\s*,\s*0xd5\b'
+    flags: i
+  message: "AES inverse S-box table detected (0x52,0x09,0x6a,0xd5…) — hand-rolled AES implementation. Key size unknown, so Grover weakening is assumed."
+  recommendation: "Replace hand-rolled AES with a vetted library (AES-256-GCM)."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - "0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38,"
+      - "0x52,0x09,0x6A,0xD5,"
+    no_match:
+      - "0x52, 0x09, 0x6b, 0xd5,"
+      - "data = [0x52, 0x90]"
+
+- id: CRYPTO_FP_SHA256_K
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "SHA-256"
+  usage_type: "implementation"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    # First SHA-256 round constant (cube root of 2). The trailing \b keeps
+    # the 64-bit SHA-512 K table (0x428a2f98d728ae22…) from matching.
+    pattern: '0x428a2f98\b'
+    flags: i
+  message: "SHA-256 round-constant table detected (K[0] = 0x428a2f98) — hand-rolled SHA-256 implementation. Flagged for quantum inventory (Grover halves the security margin)."
+  recommendation: "Use a vetted SHA-256 from the platform crypto library; hand-rolled compression functions invite subtle bugs."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - "0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,"
+      - "K[0] = 0x428A2F98;"
+    no_match:
+      - "0x428a2f98d728ae22, 0x7137449123ef65cd,"
+      - "k = 0x428b2f98"
+
+- id: CRYPTO_FP_SHA256_IV
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "SHA-256"
+  usage_type: "implementation"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    # SHA-256 H0 (square root of 2). The trailing \b keeps the SHA-512 IV
+    # (0x6a09e667f3bcc908) from matching — SHA-512 is quantum-safe and must
+    # not be flagged by this pack.
+    pattern: '0x6a09e667\b'
+    flags: i
+  message: "SHA-256 initialization vector detected (H0 = 0x6a09e667) — hand-rolled SHA-256 implementation. Flagged for quantum inventory (Grover halves the security margin)."
+  recommendation: "Use a vetted SHA-256 from the platform crypto library."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - "h0 = 0x6a09e667"
+      - "0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,"
+    no_match:
+      - "0x6a09e667f3bcc908, 0xbb67ae8584caa73b,"
+      - "h0 = 0x6a09e668"
+
+- id: CRYPTO_FP_SHA1_IV
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "SHA-1"
+  usage_type: "implementation"
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    # SHA-1 IV pair (H0, H1) on one line. NOTE: MD5 shares these first two
+    # init words (A = 0x67452301, B = 0xefcdab89), so this fingerprint is
+    # SHA-1/MD5-ambiguous — both are classically broken, so the risk tier is
+    # correct either way. Requiring the pair (not just 0x67452301) keeps
+    # arbitrary single constants from firing.
+    pattern: '0x67452301\b.{0,80}0xefcdab89\b'
+    flags: i
+  message: "SHA-1 (or MD5 — shared constants) initialization vector detected (0x67452301, 0xefcdab89) — hand-rolled implementation of a classically broken hash."
+  recommendation: "Remove the hand-rolled digest; use SHA-256 or SHA-3 from a vetted library."
+  cwe: [328]
+  confidence: 0.85
+  examples:
+    match:
+      - "h0, h1 = 0x67452301, 0xefcdab89"
+      - "var h = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];"
+    no_match:
+      - "h0 = 0x67452301"
+      - "state = [0x6a09e667, 0xefcdab89]"
+
+- id: CRYPTO_FP_MD5_SINE
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "MD5"
+  usage_type: "implementation"
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    # First MD5 sine-table constant T[1] = floor(2^32 * |sin(1)|). Unlike the
+    # IV, the sine table is unique to MD5.
+    pattern: '0xd76aa478\b'
+    flags: i
+  message: "MD5 sine-table constant detected (0xd76aa478) — hand-rolled MD5 implementation. MD5 is classically broken."
+  recommendation: "Remove the hand-rolled digest; use SHA-256 or SHA-3 from a vetted library."
+  cwe: [328]
+  confidence: 0.9
+  examples:
+    match:
+      - "0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,"
+      - "T[0] = 0xD76AA478;"
+    no_match:
+      - "checksum = 0xd76aa479"
+      - "id = 0xd76aa4789"
+
+- id: CRYPTO_FP_MODP_PRIME
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: high
+  algorithm: "DH"
+  usage_type: "implementation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # Leading hex fragment shared by every RFC 3526 / RFC 2409 MODP group
+    # prime (2^n - 2^(n-64) - 1 + 2^64 * floor(...)): a MODP prime IS
+    # finite-field Diffie-Hellman, wherever it appears.
+    pattern: 'FFFFFFFFFFFFFFFFC90FDAA2'
+    flags: i
+  message: "RFC 3526/2409 MODP group prime detected — finite-field Diffie-Hellman parameters embedded in code/config. DH is quantum-vulnerable (Shor)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'p_hex = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"'
+      - "prime = 0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1"
+    no_match:
+      - "mask = 0xFFFFFFFFFFFFFFFF"
+      - "p_hex = load_group_prime()"
+
+- id: CRYPTO_FP_CURVE25519_PRIME
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: low
+  algorithm: "ECDH"
+  usage_type: "implementation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # Curve25519 field prime 2^255 - 19 (python ** / shift forms) or the
+    # a24 ladder constant 121665 = (486662 - 2) / 4. The bare 121665 variant
+    # is the weak signal that keeps this rule at low confidence.
+    pattern: '2\s*\*\*\s*255\s*-\s*19\b|1[lL]?\s*<<\s*255\s*\)?\s*-\s*19\b|\b121665\b'
+  message: "Curve25519 constant detected (2^255 - 19 field prime or the 121665 ladder constant) — possible hand-rolled X25519/ECDH. Classical ECDH is quantum-vulnerable (Shor)."
+  recommendation: "Use a vetted X25519 implementation as an interim step and migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.4
+  examples:
+    match:
+      - "p = 2**255 - 19"
+      - "P = (1 << 255) - 19"
+      - "a24 = 121665"
+    no_match:
+      - "x = 121665789"
+      - "p = 2**255 - 21"
+      - "n = 2 ** 255 - 197"
+
+- id: CRYPTO_FP_SECP256K1_PRIME
+  language: any
+  category: crypto-fingerprint
+  layer: detection
+  severity: high
+  algorithm: "ECDSA"
+  usage_type: "implementation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # Canonical tail of the secp256k1 field prime
+    # (…FFFFFFFE FFFFFC2F = 2^256 - 2^32 - 977). The 16-hex-char tail is
+    # unique to the curve used by Bitcoin/Ethereum ECDSA.
+    pattern: 'FFFFFFFEFFFFFC2F'
+    flags: i
+  message: "secp256k1 field prime detected — elliptic-curve (ECDSA/ECDH) parameters embedded in code. ECC is quantum-vulnerable (Shor)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205); blockchain protocols need a coordinated PQC migration plan."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - "P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"
+      - '"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"'
+    no_match:
+      - "mask = 0xFFFFFFFEFFFFFC30"
+      - "word = 0xFFFFFFFE"

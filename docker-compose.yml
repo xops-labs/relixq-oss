@@ -1,0 +1,61 @@
+name: relixq-oss
+
+# Self-contained local stack: Postgres + the OSS API + the OSS web app.
+# No external networks, no cloud emulators. `docker compose up --build` and open
+# the web app. See README.md.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-relixq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relixq}
+      POSTGRES_DB: ${POSTGRES_DB:-relixq}
+    ports:
+      - "${POSTGRES_PORT:-47432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-relixq} -d ${POSTGRES_DB:-relixq}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-relixq};Username=${POSTGRES_USER:-relixq};Password=${POSTGRES_PASSWORD:-relixq}"
+      Web__Origin: "http://localhost:${WEB_PORT:-47000}"
+      # "Local path" projects scan subpaths under this in-container directory,
+      # which is the LOCAL_SCAN_PATH host folder mounted read-only below.
+      Scan__LocalRoot: "/scan"
+    volumes:
+      # Drop (or symlink) repos under ./scan-targets to scan them via "Local path".
+      # Read-only so a scan can never modify your source.
+      - "${LOCAL_SCAN_PATH:-./scan-targets}:/scan:ro"
+      # Persist uploaded source archives so "Upload code (.zip)" projects survive restarts.
+      - uploads:/app/uploads
+    ports:
+      - "${API_PORT:-47080}:8080"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    environment:
+      # Server-side calls from the web container to the API container.
+      RELIXQ_API_BASE_URL: "http://api:8080"
+      NEXT_PUBLIC_APP_NAME: "Relix-Q OSS"
+    ports:
+      - "${WEB_PORT:-47000}:3000"
+
+volumes:
+  pgdata:
+  uploads:

@@ -1,0 +1,141 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: VYPER_ECRECOVER
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\becrecover\\s*\\("
+  message: "ecrecover(...) — secp256k1 ECDSA signature recovery; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: VYPER_KECCAK256
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Keccak256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "\\bkeccak256\\s*\\("
+  message: "keccak256(...) — Grover halves effective preimage security from 256 to 128 bits; inventory hash usage."
+  confidence: 0.35
+
+- id: VYPER_SHA256
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "\\bsha256\\s*\\("
+  message: "sha256(...) — precompile 0x02; Grover halves effective preimage security."
+  confidence: 0.55
+
+- id: VYPER_KECCAK256_CONVERT
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "Keccak256"
+  usage_type: "hashing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "convert\\s*\\(\\s*keccak256\\s*\\("
+  message: "convert(keccak256(...), ...) — hash cast to scalar; often paired with weak randomness or insecure entropy designs."
+  cwe: [328]
+  confidence: 0.5
+
+- id: VYPER_EXTRACT32
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "ByteHandling"
+  usage_type: "deserialization"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bextract32\\s*\\("
+  message: "extract32(...) — byte-pointer deserialization; often used to parse signatures or key material."
+  confidence: 0.3
+
+- id: VYPER_PRECOMPILE_ECRECOVER
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*0x0000000000000000000000000000000000000001\\s*"
+  message: "Direct staticcall to 0x...0001 — raw ecrecover precompile invocation; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.92
+
+- id: VYPER_PRECOMPILE_SHA256
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*0x0000000000000000000000000000000000000002\\s*"
+  message: "Direct staticcall to 0x...0002 — raw sha256 precompile invocation."
+  confidence: 0.6
+
+- id: VYPER_PRECOMPILE_MODEXP
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "ModExp"
+  usage_type: "math"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*0x0000000000000000000000000000000000000005\\s*"
+  message: "Direct staticcall to 0x...0005 — modexp precompile; RSA / discrete-log primitive; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.85
+
+- id: VYPER_PRAGMA_OUTDATED
+  language: vyper
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "VyperCompiler"
+  usage_type: "language_version"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "pragma\\s+version\\s+[<≤]\\s*0\\.(?:[0-2])\\b"
+  message: "pragma version targets Vyper < 0.3 — outdated compiler with known crypto-relevant bugs."
+  cwe: [682]
+  confidence: 0.85

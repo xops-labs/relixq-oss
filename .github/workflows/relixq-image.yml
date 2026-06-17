@@ -1,0 +1,51 @@
+# Build and publish the slim relixq scanner image to GHCR for every push to
+# main, tagged `main` + `sha-<short>`. Release tags (vX.Y.Z) are published by
+# .github/workflows/release.yml instead, which adds the semver tags and moves
+# `latest` — so `latest` always means "latest release", per Docker convention.
+# The GitHub Action (github-action/action.yml) pins a released version tag.
+name: Publish scanner image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/go/**'
+      - 'Dockerfile.scanner'
+      - 'github-action/entrypoint.sh'
+      - '.github/workflows/relixq-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/relixq
+          tags: |
+            type=raw,value=main
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.scanner
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=main
+            COMMIT=${{ github.sha }}

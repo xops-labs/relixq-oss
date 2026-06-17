@@ -1,0 +1,9 @@
+# GIT-ONLY re-include. The repo-root .gitignore excludes `vendor/` (build
+# artifacts), but this corpus's vendored file is a deliberate fixture — it
+# exists to pin the walker's vendored-dir exclusion policy (see
+# `policy_excluded` in expected-findings.yaml) and must be committed.
+#
+# This file is NOT read by the scanner: the sibling .relixqignore takes
+# precedence in the suppression loader, so the scan-time vendored-dir policy
+# is unaffected by this negation.
+!vendor/

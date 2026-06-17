@@ -1,0 +1,359 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Dockerfile crypto rules
+#
+# Dockerfile is the *image build* surface where the cryptographic
+# baseline of every container is pinned: which OpenSSL version is
+# baked in via the base image, what curl / wget invocations the build
+# step trusts, what private material gets COPYed in, and what
+# `RUN openssl ...` / `RUN ssh-keygen ...` commands generate at build
+# time. Catching these at build time prevents downstream surprises
+# when the runtime certificate chain or random key spec falls back to
+# something pre-quantum or pre-TLS-1.2.
+#
+# Strategy: regex-only. There's no widely-adopted Dockerfile AST
+# parser in Go (BuildKit's frontend exposes one but pulling that into
+# the engine's go.mod is a heavy lift). Regex
+# matches per-line; Dockerfile's single-line directive shape
+# (`FROM ...`, `RUN ...`, `COPY ...`, `ENV ...`) makes per-line regex
+# > 95% accurate without a parser.
+#
+# One existing rule (`IAC_DOCKERFILE_OLD_TLS` in rules/config/iac.yaml)
+# already covers `--tlsv1.0` / `--tlsv1.1` curl flags. This pack is
+# purely additive — no rule IDs collide.
+#
+# Coverage map:
+#   - Base-image EOL:    Alpine 3.10-3.14, Debian jessie/stretch,
+#                        CentOS 6/7
+#   - Key generation:    openssl genrsa weak bit-lengths, ssh-keygen
+#                        weak/deprecated algos, gpg weak ciphers
+#   - Curl / wget TLS:   --tlsv1.0/1.1, --ciphers RC4/3DES, --insecure,
+#                        -k, --no-check-certificate
+#   - Embedded secrets:  COPY private.key / COPY *.pem heuristics
+#   - Misconfig:         non-system SSL_CERT_FILE, openssl1.0.x pins,
+#                        deprecated pip pycrypto package
+#
+# RSA / DSA / ECDSA key material is `quantum_safety: vulnerable`
+# regardless of bit-length — Shor's algorithm breaks the underlying
+# assumption, not the size. NIST FIPS 203/204/205 (ML-KEM / ML-DSA /
+# SLH-DSA) are the recommended migration targets where the toolchain
+# (OpenSSL 3.4+, OpenSSH 9.0+) exposes them.
+
+# ---------------------------------------------------------------------------
+# Base-image EOL — Alpine 3.10 through 3.14
+# ---------------------------------------------------------------------------
+# Alpine 3.10 reached EOL 2021-05; 3.11 in 2021-11; 3.12 in 2022-05;
+# 3.13 in 2022-11; 3.14 in 2023-05. All ship LibreSSL / OpenSSL 1.1.1
+# variants that no longer receive security patches. Any `FROM
+# alpine:3.1[0-4]` baseline locks the image to known-vulnerable TLS.
+- id: DOCKERFILE_BASE_EOL_ALPINE
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*FROM\s+\S*alpine:3\.(1[0-4])(\b|[^0-9])'
+  message: "Dockerfile pins an EOL Alpine base image (3.10-3.14) with unpatched OpenSSL / LibreSSL."
+  recommendation: "Upgrade to alpine:3.19 or later (OpenSSL 3.x) and rebuild. Pin a minor or digest, not 'latest'."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Base-image EOL — Debian jessie / stretch
+# ---------------------------------------------------------------------------
+# Debian 8 jessie EOL 2020-06; Debian 9 stretch EOL 2022-06. Both ship
+# OpenSSL 1.0.x by default; security updates have stopped.
+- id: DOCKERFILE_BASE_EOL_DEBIAN
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*FROM\s+\S*debian:(jessie|stretch)(\b|[^a-z0-9])'
+  message: "Dockerfile pins an EOL Debian base image (jessie / stretch) with unpatched OpenSSL 1.0.x."
+  recommendation: "Upgrade to debian:bookworm (OpenSSL 3.x) or debian:bullseye-slim minimum."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Base-image EOL — CentOS 6 / 7
+# ---------------------------------------------------------------------------
+# CentOS 6 EOL 2020-11; CentOS 7 EOL 2024-06. Both ship OpenSSL 1.0.x.
+# CentOS 8 / Stream replacements are not flagged here.
+- id: DOCKERFILE_BASE_EOL_CENTOS
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*FROM\s+\S*centos:[67](\b|[^0-9])'
+  message: "Dockerfile pins an EOL CentOS base image (6 or 7) — no upstream security patches."
+  recommendation: "Migrate to Rocky Linux 9, AlmaLinux 9, or RHEL UBI 9 (OpenSSL 3.x)."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# openssl genrsa — weak 1024-bit RSA key generation at build time
+# ---------------------------------------------------------------------------
+# `openssl genrsa 1024` or `openssl genrsa -out key.pem 1024` produce
+# a 1024-bit modulus, factorable below 2010-era effort. Critical.
+- id: DOCKERFILE_OPENSSL_GENRSA_1024
+  language: dockerfile
+  category: weak-crypto
+  severity: critical
+  algorithm: RSA
+  key_size: 1024
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bopenssl\s+genrsa\b(?:\s+-out\s+\S+)?\s+1024\b'
+  message: "Dockerfile RUN openssl genrsa generates a 1024-bit RSA key — broken classically."
+  recommendation: "Use 3072-bit minimum (`openssl genrsa -out key.pem 3072`); plan migration to ML-DSA / hybrid certificates."
+  cwe: [326]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# openssl genrsa — 2048-bit RSA (PQC inventory signal)
+# ---------------------------------------------------------------------------
+# RSA-2048 is the current safe-classical minimum but quantum-vulnerable.
+# Medium severity — flagged as PQC migration debt, not a today-critical.
+- id: DOCKERFILE_OPENSSL_GENRSA_2048
+  language: dockerfile
+  category: weak-crypto
+  severity: medium
+  algorithm: RSA
+  key_size: 2048
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bopenssl\s+genrsa\b(?:\s+-out\s+\S+)?\s+2048\b'
+  message: "Dockerfile RUN openssl genrsa generates a 2048-bit RSA key — safe classically but quantum-vulnerable; flagged for PQC inventory."
+  recommendation: "Plan migration to hybrid (ECDSA+ML-DSA) or pure ML-DSA-65 once OpenSSL 3.4+ is the build base."
+  cwe: [327]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# ssh-keygen — weak RSA bit-length
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_SSHKEYGEN_RSA_1024
+  language: dockerfile
+  category: weak-crypto
+  severity: critical
+  algorithm: RSA
+  key_size: 1024
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bssh-keygen\b[^#\n]*?-t\s+rsa\b[^#\n]*?-b\s+1024\b'
+  message: "Dockerfile RUN ssh-keygen generates a 1024-bit RSA SSH key — broken classically."
+  recommendation: "Use `-b 3072` minimum, or switch to `-t ed25519` (still pre-quantum but stronger classically; plan hybrid PQC SSH when OpenSSH exposes ML-DSA)."
+  cwe: [326]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# ssh-keygen — DSA (deprecated since OpenSSH 7.0)
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_SSHKEYGEN_DSA
+  language: dockerfile
+  category: weak-crypto
+  severity: critical
+  algorithm: DSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bssh-keygen\b[^#\n]*?-t\s+dsa\b'
+  message: "Dockerfile RUN ssh-keygen generates a DSA SSH key — DSA is deprecated and removed from OpenSSH 9.8+."
+  recommendation: "Switch to `-t ed25519` or `-t rsa -b 3072`; plan hybrid PQC SSH migration."
+  cwe: [327]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# gpg --gen-key interactive (often paired with weak defaults)
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_GPG_GEN_KEY_INTERACTIVE
+  language: dockerfile
+  category: weak-crypto
+  severity: medium
+  algorithm: PGP
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bgpg\b[^#\n]*?(--gen-key|--generate-key)\b'
+  message: "Dockerfile RUN gpg --gen-key invocation in a non-interactive context — likely produces a default-config key (RSA-2048 / SHA-1 backward compat)."
+  recommendation: "Use `--batch --quick-gen-key` with an explicit algorithm spec (`ed25519/cert,sign+cv25519/encr` minimum) and disable SHA-1 fallback."
+  cwe: [327]
+  confidence: 0.8
+# ---------------------------------------------------------------------------
+# gpg --cipher-algo — weak symmetric algorithms
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_GPG_WEAK_CIPHER
+  language: dockerfile
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '(?i)\bgpg\b[^#\n]*?--cipher-algo\s+(CAST5|IDEA|3DES|DES)\b'
+  message: "Dockerfile RUN gpg pins a weak cipher (CAST5 / IDEA / 3DES / DES) via --cipher-algo."
+  recommendation: "Remove the flag (default AES-256 is fine) or pin AES256 explicitly: `--cipher-algo AES256`."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# ENV / curl options — deprecated TLS versions in env var
+# ---------------------------------------------------------------------------
+# Catches `ENV CURL_OPTIONS="--tlsv1.0 ..."` and similar shell-env
+# patterns. The existing IAC_DOCKERFILE_OLD_TLS rule fires on `--tlsv1.0`
+# in a RUN line; this rule additionally fires on ENV-baked options.
+- id: DOCKERFILE_ENV_CURL_OLD_TLS
+  language: dockerfile
+  category: weak-tls
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*ENV\b[^#\n]*?(--tlsv1\.[01]|--ssl-?protocol\s*=?\s*(SSLv|TLSv1\.[01]))'
+  message: "Dockerfile ENV declares curl/wget options pinning a deprecated TLS version."
+  recommendation: "Drop the explicit --tlsv1.0/1.1 flag from the ENV; rely on TLS 1.2+ defaults."
+  cwe: [327]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# ENV / curl options — weak ciphers in env var
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_ENV_CURL_WEAK_CIPHER
+  language: dockerfile
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: tls_config
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '(?i)^\s*ENV\b[^#\n]*?--ciphers[= ][^"''\n]*(RC4|3DES|DES-CBC|NULL|EXPORT)'
+  message: "Dockerfile ENV declares curl options forcing weak ciphers (RC4 / 3DES / NULL / EXPORT)."
+  recommendation: "Remove --ciphers override; rely on libcurl defaults (TLS 1.2+ AEAD)."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# curl --insecure / -k — TLS verification bypass
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_CURL_INSECURE
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bcurl\b[^#\n]*?(\s--insecure\b|\s-k\s|\s-k$)'
+  message: "Dockerfile RUN curl uses --insecure / -k — disables TLS certificate verification."
+  recommendation: "Remove the flag and pin the correct CA bundle (`--cacert`) or trust the system store."
+  cwe: [295]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# wget --no-check-certificate — TLS verification bypass
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_WGET_NO_CHECK_CERT
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bwget\b[^#\n]*?--no-check-certificate\b'
+  message: "Dockerfile RUN wget uses --no-check-certificate — disables TLS certificate verification."
+  recommendation: "Remove the flag; use `--ca-certificate=` to pin a known CA bundle if needed."
+  cwe: [295]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# COPY private key material into image (heuristic — high signal)
+# ---------------------------------------------------------------------------
+# Anything matching `COPY <src> <dst>` where <src> looks like
+# private.key / *.pem / id_rsa / *.p12 / *.pfx is flagged as embedded
+# secret material. Inventory-grade signal; not all such files are
+# actually secret, but reviewers should explicitly justify.
+- id: DOCKERFILE_COPY_PRIVATE_KEY
+  language: dockerfile
+  category: secret-exposure
+  severity: critical
+  algorithm: RSA
+  usage_type: secret
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*COPY\b[^#\n]*?(\bprivate\.key\b|\b(id_rsa|id_dsa|id_ecdsa)\b|\.pem\b|\.p12\b|\.pfx\b|\.key\b)'
+  message: "Dockerfile COPY embeds private-key material into the image — secret exposure."
+  recommendation: "Inject secrets at runtime via a secret manager (Docker secrets / Kubernetes secrets / Vault) or BuildKit `--mount=type=secret`; never bake them into image layers."
+  cwe: [798]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# ENV SSL_CERT_FILE pointing at non-system path
+# ---------------------------------------------------------------------------
+# Heuristic: `ENV SSL_CERT_FILE=/tmp/...` or `/root/...` or `/build/...`
+# usually indicates a build-time override that should never reach
+# production. System paths (/etc/ssl/...) are not flagged.
+- id: DOCKERFILE_ENV_SSL_CERT_FILE_NONSYSTEM
+  language: dockerfile
+  category: weak-tls
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)^\s*ENV\s+SSL_CERT_FILE\s*=?\s*[''"]?(/tmp/|/root/|/build/|/home/|\./)'
+  message: "Dockerfile ENV SSL_CERT_FILE points at a non-system path — likely a build-time override leaking into runtime."
+  recommendation: "Unset SSL_CERT_FILE before the final image stage, or point it at `/etc/ssl/certs/ca-certificates.crt`."
+  cwe: [295]
+  confidence: 0.8
+# ---------------------------------------------------------------------------
+# apt-get install pinning old openssl1.0.x package
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_APT_OPENSSL_OLD
+  language: dockerfile
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '(?i)\bapt(-get)?\b[^#\n]*?\binstall\b[^#\n]*?\bopenssl1\.0\.[012]\b'
+  message: "Dockerfile apt-get install pins openssl1.0.x — pre-OpenSSL-1.1.1, no TLS 1.3 support."
+  recommendation: "Install openssl (the distro's current stream) instead of the pinned legacy package; or move to a modern base image."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# pip install pycrypto — deprecated, unmaintained since 2014
+# ---------------------------------------------------------------------------
+- id: DOCKERFILE_PIP_PYCRYPTO
+  language: dockerfile
+  category: weak-crypto
+  severity: high
+  algorithm: PYCRYPTO
+  usage_type: library
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # RE2 has no negative lookahead; instead match `pycrypto` followed by
+    # any non-alphanumeric (or EOL) so `pycryptodome` (the legitimate
+    # replacement) doesn't trip the rule.
+    pattern: '(?i)\bpip3?\b[^#\n]*?\binstall\b[^#\n]*?\bpycrypto([^a-zA-Z0-9]|$)'
+  message: "Dockerfile pip install pycrypto — unmaintained since 2014, multiple CVEs; replaced by pycryptodome."
+  recommendation: "Replace with `pip install pycryptodome` (drop-in for `Crypto.*` imports) or the modern `cryptography` package."
+  cwe: [1104]
+  confidence: 0.98

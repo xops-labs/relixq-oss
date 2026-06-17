@@ -1,0 +1,10 @@
+**/node_modules
+**/bin
+**/obj
+**/.next
+**/dist
+**/.turbo
+.git
+.github
+*.log
+**/*.user

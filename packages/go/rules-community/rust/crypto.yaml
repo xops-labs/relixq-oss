@@ -1,0 +1,47 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Rust crypto rules
+# Rust cryptography is fragmented across crates: rsa, sha1, md-5, ring,
+# openssl, ed25519-dalek, etc. The rules below target the most-used
+# quantum-vulnerable and weak-primitive entry points in those crates.
+#
+# The rustast (Tree-sitter) runner accepts these query forms:
+#   call:<scoped::path>     — Type::method(...) or pkg::Type::method(...)
+#   methodcall:<method>     — .method(...) instance method (receiver-agnostic)
+#   use:<path>              — use pkg::Type;   (trailing `*` is a wildcard)
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that
+# need to discriminate by key-size literal stay on the regex detector.
+- id: RUST_RUSTCRYPTO_SHA1
+  language: rust
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: matches `Sha1::new()` from the RustCrypto `sha1` crate. The hasher
+  # is also commonly invoked via `Sha1::digest(...)` — covered by the
+  # short-path companion rule RUST_RUSTCRYPTO_SHA1_DIGEST.
+  detector:
+    type: ast
+    query: "call:Sha1::new"
+  message: "Sha1::new() — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use sha2::Sha256 or sha3::Sha3_256 for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.93
+- id: RUST_RUSTCRYPTO_MD5
+  language: rust
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: matches `Md5::new()` from the RustCrypto `md-5` crate.
+  detector:
+    type: ast
+    query: "call:Md5::new"
+  message: "Md5::new() — MD5 is cryptographically broken."
+  recommendation: "Use sha2::Sha256 or sha3::Sha3_256 for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.93

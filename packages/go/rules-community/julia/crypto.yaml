@@ -1,0 +1,164 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Julia crypto rules
+# Julia's crypto surface centers on three packages:
+#   - SHA.jl     — stdlib hash functions (sha1, sha256, sha512, md5)
+#   - Nettle.jl  — FFI wrapper for libnettle; ciphers + hashes
+#   - MbedTLS.jl — FFI wrapper for mbedTLS; TLS, RSA, ECDSA, AES
+# Julia has NO first-class PQC ecosystem as of mid-2026. Migrators have to wrap
+# liboqs (Open Quantum Safe) via ccall / @ccall or the libsodium binding for
+# ChaCha20/Poly1305. Flag the gap loudly — scientific-computing teams running
+# Julia for ML / financial models tend to under-invest in crypto agility.
+#
+# The juliaast (Tree-sitter) runner accepts these query forms:
+#   call:<Module>.<func>   — Module.func(...)   — field_expression callee
+#   call:<func>            — bare func(...)     — identifier callee
+#   using:<Module>         — `using Module` / `using A.B` / `using Foo: bar`
+#   import:<Module>        — `import Module`    (separate node kind in grammar)
+#
+# Argument-value matching (e.g. discriminating `Nettle.Hasher("md5")` from
+# `Nettle.Hasher("sha256")`) is intentionally NOT in the AST DSL — those rules
+# stay on the regex detector until the DSL gains literal-arg support.
+
+# ---------------------------------------------------------------------------
+# SHA.jl stdlib — broken hashes
+# ---------------------------------------------------------------------------
+- id: JULIA_SHA_MD5
+  language: julia
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: matches `SHA.md5(x)` — field_expression callee with module=SHA.
+  detector:
+    type: ast
+    query: "call:SHA.md5"
+  message: "SHA.md5(...) — MD5 is cryptographically broken (collisions since 2004)."
+  recommendation: "Use SHA.sha256 / SHA.sha3_256 for non-password hashing; for passwords wrap libsodium (Argon2id) via ccall."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: JULIA_SHA_SHA1
+  language: julia
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:SHA.sha1"
+  message: "SHA.sha1(...) — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use SHA.sha256 or SHA.sha3_256 (FIPS 202) for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.93
+- id: JULIA_BARE_MD5
+  language: julia
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: after `using SHA` users typically call `md5(x)` bare. The bare-callee
+  # form catches that without the module prefix.
+  detector:
+    type: ast
+    query: "call:md5"
+  message: "md5(...) — MD5 is cryptographically broken (after `using SHA`)."
+  recommendation: "Use sha256 / sha3_256 from SHA.jl, or wrap libsodium via ccall."
+  cwe: [328]
+  confidence: 0.85
+- id: JULIA_BARE_SHA1
+  language: julia
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:sha1"
+  message: "sha1(...) — SHA-1 is cryptographically broken (after `using SHA`)."
+  recommendation: "Use sha256 / sha3_256 from SHA.jl."
+  cwe: [328]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Nettle.jl — argument-discriminating regex rules
+# ---------------------------------------------------------------------------
+- id: JULIA_NETTLE_HASHER_MD5
+  language: julia
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Regex: AST DSL can't yet discriminate `Nettle.Hasher("md5")` from
+  # `Nettle.Hasher("sha256")` — argument-literal matching isn't in the DSL.
+  # The pattern covers both the module-qualified and bare `Hasher` forms
+  # (after `using Nettle`) so we don't miss the unprefixed call site.
+  detector:
+    type: regex
+    pattern: '(?:Nettle\.)?Hasher\s*\(\s*["''](?:md5|sha1)["'']'
+  message: "Nettle.Hasher(\"md5|sha1\") — broken hash primitive."
+  recommendation: "Switch to Nettle.Hasher(\"sha256\") or SHA.sha256; long-term, wrap libsodium via ccall."
+  cwe: [328]
+  confidence: 0.92
+- id: JULIA_NETTLE_ENCRYPTOR_DES
+  language: julia
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Regex: discriminate broken/legacy symmetric ciphers passed as a string.
+  # Covers Nettle's `Encryptor`/`Decryptor` constructors and the convenience
+  # `encrypt`/`decrypt` wrappers.
+  detector:
+    type: regex
+    pattern: 'Nettle\.(?:Encryptor|Decryptor|encrypt|decrypt)\s*\(\s*["''](?:DES|DES3|3DES|RC4|BLOWFISH|CAST128)\b'
+  message: "Nettle.Encryptor(\"DES|3DES|RC4|BLOWFISH|CAST128\") — legacy symmetric cipher."
+  recommendation: "Use AES-256-GCM (Nettle's GCM mode) or wrap libsodium's ChaCha20-Poly1305 via ccall."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Random.MersenneTwister used for crypto — seed-discriminating regex
+# ---------------------------------------------------------------------------
+- id: JULIA_INSECURE_RAND_HARDCODED_SEED
+  language: julia
+  category: weak-prng
+  severity: high
+  algorithm: MersenneTwister
+  usage_type: random
+  quantum_safety: vulnerable
+  # Regex: hardcoded integer seed for MersenneTwister. MT is fundamentally not
+  # cryptographically secure regardless of seed; surfacing the hardcoded-seed
+  # form catches the worst variants. AST DSL can't yet discriminate literal
+  # int args.
+  detector:
+    type: regex
+    pattern: '(?:Random\.)?MersenneTwister\s*\(\s*\d+\s*\)'
+  message: "MersenneTwister(<int>) — non-cryptographic PRNG with hardcoded seed."
+  recommendation: "Use Random.RandomDevice() for crypto-grade randomness, or wrap libsodium's randombytes_buf via ccall."
+  cwe: [338, 330]
+  confidence: 0.88
+# ---------------------------------------------------------------------------
+# using/import — dependency-surface signals
+# ---------------------------------------------------------------------------
+- id: JULIA_USING_SHA
+  language: julia
+  category: weak-hash
+  severity: info
+  algorithm: SHA
+  usage_type: dependency
+  quantum_safety: vulnerable
+  # AST: surfaces `using SHA` as a low-confidence dependency signal that
+  # complements the call-site rules above. SHA.jl exports both broken
+  # (md5/sha1) and safe (sha256/sha3_256) primitives, so this is informational.
+  detector:
+    type: ast
+    query: "using:SHA"
+  message: "`using SHA` — SHA.jl in scope; review for md5/sha1 call sites."
+  recommendation: "Audit downstream call sites; prefer sha256 / sha3_256 over md5 / sha1."
+  cwe: []
+  confidence: 0.4

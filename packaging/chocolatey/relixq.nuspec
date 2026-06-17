@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>relixq</id>
+    <version>0.1.0</version>
+    <packageSourceUrl>https://github.com/xops-labs/relixq-oss/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>xops-labs</owners>
+    <title>Relix-Q Community (CLI)</title>
+    <authors>Relix-Q</authors>
+    <projectUrl>https://relixq-website.vercel.app</projectUrl>
+    <licenseUrl>https://github.com/xops-labs/relixq-oss/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/xops-labs/relixq-oss</projectSourceUrl>
+    <docsUrl>https://relixq-website.vercel.app/#download</docsUrl>
+    <bugTrackerUrl>https://github.com/xops-labs/relixq-oss/issues</bugTrackerUrl>
+    <tags>relixq cryptography post-quantum pqc security scanner cli sarif admin</tags>
+    <summary>Scan code for quantum-vulnerable cryptography and report post-quantum readiness.</summary>
+    <description>
+Relix-Q is an open-source scanner for quantum-vulnerable cryptography. It
+inventories weak and quantum-broken crypto across source code, dependencies,
+TLS endpoints, and certificates, scores the risk, and exports findings as
+JSON, SARIF, Markdown, or HTML for CI gating.
+
+This package installs the `relixq` command-line scanner (the Windows MSI). For
+the self-hosted web dashboard, run the Docker stack instead — see
+https://relixq-website.vercel.app/#download.
+    </description>
+    <releaseNotes>https://github.com/xops-labs/relixq-oss/releases/tag/v0.1.0</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

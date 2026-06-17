@@ -1,0 +1,309 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: PYTHON_ECDSA_GEN
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bec\\.generate_private_key\\s*\\("
+  message: "Elliptic-curve key generation. ECDSA/ECDH are quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205); key establishment to ML-KEM (FIPS 203)."
+  cwe: [327]
+  examples:
+    match:
+      - 'private_key = ec.generate_private_key(ec.SECP256R1())'
+    no_match:
+      - 'private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)'
+
+- id: PYTHON_CRYPTOGRAPHY_RSA_GEN
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa\\.generate_private_key\\s*\\("
+  message: "cryptography.hazmat RSA key generation. RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)'
+    no_match:
+      - 'private_key = ec.generate_private_key(ec.SECP384R1())'
+
+- id: PYTHON_PYCRYPTO_RSA
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA\\.generate\\s*\\("
+  message: "PyCrypto/Cryptodome RSA key generation. RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'key = RSA.generate(2048)'
+    no_match:
+      - 'key = RSA.import_key(open("key.pem", "rb").read())'
+
+- id: PYTHON_DSA_GEN
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bdsa\.generate_private_key\s*\('
+  message: "cryptography.hazmat DSA key generation. DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'private_key = dsa.generate_private_key(key_size=2048)'
+    no_match:
+      - 'private_key = ecdsa.generate_private_key(key_size=2048)'
+
+- id: PYTHON_DH_GEN
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bdh\.generate_(parameters|private_key)\s*\('
+  message: "cryptography.hazmat finite-field Diffie-Hellman parameter/key generation. DH is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'parameters = dh.generate_parameters(generator=2, key_size=2048)'
+    no_match:
+      - 'parameters = dh.DHParameterNumbers(p, g).parameters()'
+
+- id: PYTHON_ED25519_GEN
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\b(Ed25519PrivateKey|Ed448PrivateKey)\.generate\s*\('
+  message: "cryptography.hazmat Ed25519/Ed448 key generation. EdDSA is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'private_key = Ed25519PrivateKey.generate()'
+    no_match:
+      - 'private_key = Ed25519PrivateKey.from_private_bytes(raw)'
+
+- id: PYTHON_X25519_X448_KEY
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\b(X25519PrivateKey|X448PrivateKey)\b'
+  message: "cryptography.hazmat X25519/X448 key material. Classical Montgomery-curve key agreement is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'private_key = X25519PrivateKey.generate()'
+    no_match:
+      - 'peer_public = X25519PublicKey.from_public_bytes(raw)'
+
+- id: PYTHON_ECDH_EXCHANGE
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bec\.ECDH\s*\('
+  message: "cryptography.hazmat ec.ECDH key agreement. Elliptic-curve Diffie-Hellman is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'shared_key = private_key.exchange(ec.ECDH(), peer_public_key)'
+    no_match:
+      - 'shared_key = private_key.exchange(peer_public_key)'
+
+# Aliased-import detection: `from cryptography.hazmat.primitives.asymmetric
+# import rsa as r` defeats the canonical-module-name call patterns above, so
+# the import line itself is the regex floor's detection point.
+- id: PYTHON_ASYM_IMPORT_RSA_ALIASED
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'from\s+cryptography\.hazmat\.primitives\.asymmetric\s+import\s+[^#]*\brsa\s+as\s+\w+'
+  message: "RSA module imported under an alias - downstream calls evade name-based detection; RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'from cryptography.hazmat.primitives.asymmetric import rsa as asym_rsa'
+    no_match:
+      - 'from cryptography.hazmat.primitives.asymmetric import rsa'
+
+- id: PYTHON_ASYM_IMPORT_EC_ALIASED
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'from\s+cryptography\.hazmat\.primitives\.asymmetric\s+import\s+[^#]*\bec\s+as\s+\w+'
+  message: "Elliptic-curve module imported under an alias - downstream calls evade name-based detection; ECDSA/ECDH are quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205); key establishment to ML-KEM (FIPS 203)."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'from cryptography.hazmat.primitives.asymmetric import ec as curves'
+    no_match:
+      - 'from cryptography.hazmat.primitives.asymmetric import ec'
+
+- id: PYTHON_ASYM_IMPORT_DSA_ALIASED
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'from\s+cryptography\.hazmat\.primitives\.asymmetric\s+import\s+[^#]*\bdsa\s+as\s+\w+'
+  message: "DSA module imported under an alias - downstream calls evade name-based detection; DSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'from cryptography.hazmat.primitives.asymmetric import dsa as legacy_dsa'
+    no_match:
+      - 'from cryptography.hazmat.primitives.asymmetric import dsa'
+
+- id: PYTHON_ASYM_IMPORT_DH_ALIASED
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DH"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'from\s+cryptography\.hazmat\.primitives\.asymmetric\s+import\s+[^#]*\bdh\s+as\s+\w+'
+  message: "Diffie-Hellman module imported under an alias - downstream calls evade name-based detection; DH is quantum-vulnerable."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'from cryptography.hazmat.primitives.asymmetric import dh as keyx'
+    no_match:
+      - 'from cryptography.hazmat.primitives.asymmetric import dh'
+
+- id: PYTHON_ASYM_IMPORT_ED25519_ALIASED
+  language: python
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'from\s+cryptography\.hazmat\.primitives\.asymmetric\s+import\s+[^#]*\bed(25519|448)\s+as\s+\w+'
+  message: "Ed25519/Ed448 module imported under an alias - downstream calls evade name-based detection; EdDSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'from cryptography.hazmat.primitives.asymmetric import ed25519 as eddsa'
+    no_match:
+      - 'from cryptography.hazmat.primitives.asymmetric import ed25519'
+
+# Hand-rolled crypto heuristic: textbook RSA implemented on bigints has no
+# library import to match, but `e = 65537` and the pow(message, exponent, n)
+# modular-exponentiation shape are a strong joint fingerprint. Low confidence
+# by design - this is a lead for review, not a verdict.
+- id: PYTHON_HANDROLLED_RSA
+  language: python
+  category: handrolled-crypto
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\be\s*=\s*65537\b|\bpow\s*\(\s*\w+\s*,\s*\w+\s*,\s*n\s*\)'
+  message: "Possible hand-rolled RSA (textbook modular-exponentiation fingerprint: e = 65537 / pow(x, y, n)). Manual review required."
+  recommendation: "Replace hand-rolled RSA with a vetted library, then migrate to ML-KEM (FIPS 203) / ML-DSA (FIPS 204)."
+  cwe: [327]
+  confidence: 0.4
+  examples:
+    match:
+      - 'e = 65537'
+      - 'cipher = pow(message, e, n)'
+    no_match:
+      - 'digest = pow(base, exponent)'

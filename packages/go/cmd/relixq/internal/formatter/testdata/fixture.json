@@ -1,0 +1,76 @@
+[
+  {
+    "rule_id": "GO_RSA_GENERATE_KEY",
+    "algorithm": "RSA",
+    "usage_type": "key_generation",
+    "quantum_safety": "vulnerable",
+    "key_size": 2048,
+    "file_path": "services/auth/keys.go",
+    "line_number": 42,
+    "snippet": "rsa.GenerateKey(rand.Reader, 2048)",
+    "severity": "critical",
+    "confidence": 0.97,
+    "message": "crypto/rsa.GenerateKey produces a quantum-vulnerable key pair.",
+    "recommendation": "Migrate to ML-KEM (FIPS 203) or a hybrid X25519+ML-KEM construction.",
+    "references": [
+      "https://csrc.nist.gov/pubs/fips/203/final"
+    ],
+    "cwe": [
+      327
+    ]
+  },
+  {
+    "rule_id": "PY_AES_ECB_MODE",
+    "algorithm": "AES",
+    "usage_type": "encryption",
+    "quantum_safety": "vulnerable",
+    "key_size": 128,
+    "file_path": "apps/web/crypto/legacy.py",
+    "line_number": 113,
+    "snippet": "Cipher(algorithms.AES(key), modes.ECB())",
+    "severity": "high",
+    "confidence": 0.92,
+    "message": "AES in ECB mode leaks plaintext structure and is not IND-CPA secure.",
+    "recommendation": "Use AES-GCM with a 256-bit key, and plan for ML-KEM-derived keys.",
+    "cwe": [
+      327,
+      696
+    ]
+  },
+  {
+    "rule_id": "CSHARP_SHA1_CREATE",
+    "algorithm": "SHA1",
+    "usage_type": "hashing",
+    "quantum_safety": "vulnerable",
+    "file_path": "services/billing/Hashing.cs",
+    "line_number": 27,
+    "snippet": "SHA1.Create()",
+    "severity": "medium",
+    "confidence": 0.99,
+    "message": "SHA-1 is broken against collision attacks; quantum reduces its effective security further."
+  },
+  {
+    "rule_id": "JAVA_ECDSA_P256_SIGN",
+    "algorithm": "ECDSA-P256",
+    "usage_type": "digital_signature",
+    "quantum_safety": "vulnerable",
+    "key_size": 256,
+    "file_path": "services/identity/src/main/java/com/relixq/Signer.java",
+    "line_number": 88,
+    "severity": "low",
+    "confidence": 0.85,
+    "message": "ECDSA over P-256 is vulnerable to Shor's algorithm on a CRQC."
+  },
+  {
+    "rule_id": "RUST_MLKEM_KEYGEN",
+    "algorithm": "ML-KEM-768",
+    "usage_type": "key_generation",
+    "quantum_safety": "quantum_safe",
+    "key_size": 768,
+    "file_path": "workers/pqc-bridge/src/kem.rs",
+    "line_number": 14,
+    "severity": "info",
+    "confidence": 1,
+    "message": "ML-KEM-768 keypair generation; recorded for inventory."
+  }
+]

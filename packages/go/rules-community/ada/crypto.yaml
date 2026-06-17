@@ -1,0 +1,234 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Ada / SPARK crypto rules
+#
+# Ada is the defense / aerospace / safety-critical workhorse: DO-178C avionics,
+# IEC 61508 industrial safety, DEF STAN UK MoD, FACE consortium, NATO STANAGs.
+# SPARK 2014 is the formally-verified subset used for high-integrity crypto
+# modules (Tokeneer, SPARKNaCl, the Muen separation kernel). Both live in the
+# same source tree (.adb / .ads / .ada) and share crypto surface area.
+#
+# Ada's cryptographic landscape is small but real:
+#   - `GNAT.SHA1`, `GNAT.MD5`, `GNAT.Hashing`, `GNATCOLL.Hash`: AdaCore-bundled
+#     hash utilities that ship with every GNAT compiler. Pre-quantum-era hash
+#     choices baked in; flag the weak ones.
+#   - `AdaCrypt.*` (Damiano Bolzoni) and `Crypto.*` (Christoph Karl Walter Grein):
+#     two community crypto stacks. Both include legacy DES, 3DES, MD5, SHA-1.
+#   - `Ada.Web_Server.Net.SSL` (AWS by AdaCore): TLS bindings with explicit
+#     protocol enums — TLSv1, TLSv1_1, SSLv23 are present and weak.
+#   - `Interfaces.C.OpenSSL.*` or thin pragma-Import wrappers around libcrypto:
+#     legacy interop where DES_*, RC4_*, MD5_* C functions get re-exported.
+#   - SPARK pragmas: `pragma SPARK_Mode (Off);` near a Cipher subprogram is an
+#     informational signal that a previously-verified path lost its proof —
+#     worth surfacing for the inventory.
+#   - `Ada.Numerics.Discrete_Random` seeded with a literal: Ada's stdlib PRNG
+#     is NOT cryptographic; explicit literal seeds make it deterministic.
+#
+# Strategy: **regex-only**. The smacker tree-sitter module pinned in `go.mod`
+# (`v0.0.0-20240827094217-dd81d9e9be82`) does not ship an Ada subpackage.
+# Regex-only is the acceptable fallback for Ada;
+# we will not vendor a grammar (we declined this for Solidity / PHP-ast too).
+# Ada syntax is verbose and identifier-heavy, which suits regex well — the
+# `with X.Y;` import form and `procedure X (...)` declarations are easy to
+# anchor on. Case-insensitive matching is applied where the language allows
+# `WITH gnat.sha1;` to be valid (Ada is case-insensitive in identifiers).
+#
+# All rule IDs are prefixed `ADA_`.
+
+# ---------------------------------------------------------------------------
+# GNAT-bundled weak hashes (AdaCore stdlib extensions)
+# ---------------------------------------------------------------------------
+- id: ADA_GNAT_SHA1
+  language: ada
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `with GNAT.SHA1;` pulls in AdaCore's bundled SHA-1 helper. SHA-1 has been
+  # cryptographically broken since SHAttered (2017). Ada has no native PQC
+  # stdlib; recommendation points at SPARKNaCl for verified replacements or a
+  # vendored libsodium / liboqs FFI binding.
+  detector:
+    type: regex
+    pattern: '(?i)\bwith\s+GNAT\.SHA1\b'
+  message: "with GNAT.SHA1; — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use GNAT.SHA256 / GNAT.SHA512 where available; for new code prefer SPARKNaCl (BLAKE2b, formally verified) or a libsodium FFI binding. Long-term, plan a PQC hash story via liboqs."
+  cwe: [328]
+  confidence: 0.95
+- id: ADA_GNAT_MD5
+  language: ada
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # MD5 collisions since 2004. GNAT.MD5 is still shipped for legacy interop
+  # (Debian package signatures, etc.) but should never appear in new code.
+  detector:
+    type: regex
+    pattern: '(?i)\bwith\s+GNAT\.MD5\b'
+  message: "with GNAT.MD5; — MD5 is cryptographically broken (collisions since 2004)."
+  recommendation: "Replace with GNAT.SHA256 or SPARKNaCl BLAKE2b. For password hashing use Argon2id via libsodium FFI."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: ADA_GNAT_HASHING_WEAK
+  language: ada
+  category: weak-hash
+  severity: medium
+  algorithm: Hash
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # `GNAT.Hashing.SHA1` and `GNAT.Hashing.MD5` are subprogram refs inside the
+  # generic GNAT.Hashing umbrella package — distinct surface from `GNAT.SHA1`.
+  detector:
+    type: regex
+    pattern: '(?i)\bGNAT\.Hashing\.(?:SHA1|MD5|MD4|MD2)\b'
+  message: "GNAT.Hashing.<SHA1|MD5|MD4|MD2> — weak hash from the GNAT.Hashing umbrella package."
+  recommendation: "Use GNAT.Hashing.SHA256 / SHA512 where available, or migrate hashing through SPARKNaCl BLAKE2b."
+  cwe: [328]
+  confidence: 0.9
+- id: ADA_GNATCOLL_HASH_WEAK
+  language: ada
+  category: weak-hash
+  severity: medium
+  algorithm: Hash
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # GNATCOLL is the GNAT Components Collection — AdaCore's standard utility
+  # library. GNATCOLL.Hash exposes wrappers around MD5 / SHA1 for caching and
+  # checksumming flows; surfacing it for inventory.
+  detector:
+    type: regex
+    pattern: '(?i)\bGNATCOLL\.Hash\.(?:MD5|SHA1)\b'
+  message: "GNATCOLL.Hash.<MD5|SHA1> — weak hash via GNAT Components Collection."
+  recommendation: "Switch to GNATCOLL.Hash.SHA256 (or stronger) for any security-sensitive checksumming."
+  cwe: [328]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# AWS (Ada Web Server) TLS protocol enums
+# ---------------------------------------------------------------------------
+- id: ADA_AWS_SSL_WEAK_PROTOCOL
+  language: ada
+  category: weak-protocol
+  severity: high
+  algorithm: TLS
+  usage_type: tls
+  quantum_safety: vulnerable
+  # AdaCore's AWS (Ada Web Server) exposes TLS protocol enums via
+  # `AWS.Net.SSL.Method` and assigns them as `Method => TLSv1` etc. TLSv1,
+  # TLSv1_1, SSLv23, SSLv3 are all deprecated. The enum form is short and
+  # unambiguous — anchor on word boundaries to avoid hitting `TLSv1_2`.
+  detector:
+    type: regex
+    pattern: '\b(?:TLSv1|TLSv1_1|SSLv23|SSLv3|SSLv2)\b'
+  message: "AWS.Net.SSL protocol enum (TLSv1 / TLSv1_1 / SSLv2/3 / SSLv23) — weak/deprecated TLS protocol."
+  recommendation: "Use TLSv1_2 minimum (TLSv1_3 preferred). Plan hybrid PQC TLS migration via OpenSSL 3.x + OQS provider behind the AWS bindings."
+  cwe: [327]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Interfaces.C wrappers around legacy libcrypto / OpenSSL symbols
+# ---------------------------------------------------------------------------
+- id: ADA_OPENSSL_DES_INTEROP
+  language: ada
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Pragma-Import-style bindings around libcrypto: `DES_set_key`,
+  # `DES_ecb_encrypt`, `DES_ede3_cbc_encrypt`, etc. The capitalized DES_
+  # prefix is the openssl C symbol convention and is regex-friendly.
+  detector:
+    type: regex
+    pattern: '\b(?:DES_set_key|DES_ecb_encrypt|DES_cbc_encrypt|DES_ede3_cbc_encrypt|DES_encrypt[123])\b'
+  message: "DES_/3DES_ libcrypto interop call — DES (56-bit) and 3DES are deprecated (NIST SP 800-131A)."
+  recommendation: "Bind AES-256-GCM (`EVP_aead_aes_256_gcm`) or ChaCha20-Poly1305 instead. Long-term: PQC AEAD is still standardizing; track NIST IR 8547."
+  cwe: [327]
+  confidence: 0.92
+- id: ADA_OPENSSL_RC4_INTEROP
+  language: ada
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(?:RC4_set_key|RC4_encrypt|RC4_options)\b'
+  message: "RC4_* libcrypto interop call — RC4 is broken (RFC 7465 prohibits in TLS)."
+  recommendation: "Bind AES-256-GCM or ChaCha20-Poly1305. Remove RC4 entirely."
+  cwe: [327]
+  confidence: 0.95
+- id: ADA_OPENSSL_MD5_INTEROP
+  language: ada
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `MD5_Init`, `MD5_Update`, `MD5_Final` — classic libcrypto stream API.
+  detector:
+    type: regex
+    pattern: '\bMD5_(?:Init|Update|Final|Transform)\b'
+  message: "MD5_* libcrypto interop call — MD5 is cryptographically broken."
+  recommendation: "Bind SHA256_/SHA512_ or EVP_sha256(). Use BLAKE2b via SPARKNaCl for verified code paths."
+  cwe: [328]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# Hardcoded key-size declarations
+# ---------------------------------------------------------------------------
+- id: ADA_HARDCODED_RSA_KEY_SIZE_WEAK
+  language: ada
+  category: weak-key-size
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  # Ada object declarations look like `Key_Size : Natural := 1024;` or
+  # `RSA_Bits : constant := 1024;`. We anchor on identifier-name fragments
+  # that strongly imply a crypto key length, paired with literal 512/1024.
+  detector:
+    type: regex
+    pattern: '(?i)\b(?:RSA_Bits|Key_Size|Key_Length|Modulus_Bits|Bits)\s*(?::\s*(?:constant\s+)?(?:Natural|Integer|Positive)?\s*)?:=\s*(?:512|768|1024)\b'
+  message: "Hardcoded RSA/DH key size 512/768/1024 — below NIST 2030 floor and quantum-vulnerable."
+  recommendation: "Interim: ≥3072-bit RSA / DH. PQC target: ML-KEM (FIPS 203) via liboqs FFI; do not invest further in classical RSA."
+  cwe: [326, 327]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Insecure PRNG seeding for crypto contexts
+# ---------------------------------------------------------------------------
+- id: ADA_WEAK_PRNG_DISCRETE_RANDOM
+  language: ada
+  category: weak-rng
+  severity: high
+  algorithm: PRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `Ada.Numerics.Discrete_Random` is the stdlib uniform PRNG — explicitly
+  # NOT cryptographic. Any `with Ada.Numerics.Discrete_Random;` in a file
+  # that also touches crypto is suspect. We surface the import itself.
+  detector:
+    type: regex
+    pattern: '(?i)\bwith\s+Ada\.Numerics\.(?:Discrete_Random|Float_Random)\b'
+  message: "with Ada.Numerics.Discrete_Random / Float_Random — Ada's stdlib PRNG is NOT cryptographically secure."
+  recommendation: "Use a CSPRNG: bind /dev/urandom directly, use SPARKNaCl's Randombytes, or call libsodium's randombytes_buf via FFI."
+  cwe: [338]
+  confidence: 0.8
+- id: ADA_WEAK_PRNG_SEEDED
+  language: ada
+  category: weak-rng
+  severity: high
+  algorithm: PRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `Reset (Gen, <literal>);` with an integer literal — fully deterministic
+  # PRNG output. Common in Ada examples and copy-pasted into production.
+  detector:
+    type: regex
+    pattern: '(?i)\bReset\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*-?[0-9]+\s*\)'
+  message: "Reset (Gen, <literal>) — Ada PRNG seeded with literal value; output is deterministic."
+  recommendation: "Either omit the seed (Reset/1 uses the clock) or use a CSPRNG. For crypto contexts, never use Ada.Numerics PRNGs at all."
+  cwe: [338, 330]
+  confidence: 0.8

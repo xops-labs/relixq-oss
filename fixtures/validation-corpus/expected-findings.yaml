@@ -1,0 +1,635 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Labeled ground truth for the validation corpus. Consumed by the CI gate at
+# packages/go/validationgate (TestCorpus). See README.md in this directory for
+# the schema reference and instructions for adding instances.
+#
+# Severity / quantum_safety values are STRICT targets, not the current rule
+# output. In particular bucket B encodes `grover_weakened` and bucket L
+# encodes `classically_broken` — taxonomy values the finding model is gaining;
+# the gate stays red until rules emit them. That red is the point of the gate.
+
+version: 1
+corpus: fixtures/validation-corpus
+
+# ----------------------------------------------------------------------------
+# instances — locations that MUST produce at least one matching finding.
+#
+#   id              stable label (bucket prefix + ordinal)
+#   file            slash-separated path relative to the corpus root
+#   line            1-based line (gate tolerance: +/-2); null = file-level
+#   algorithm       accepted algorithm string(s); case-insensitive; the gate
+#                   also folds punctuation (AES-128 == AES128, SHA-1 == SHA1)
+#                   and treats 3DES / TripleDES / DESede as synonyms
+#   bucket          A (Shor-broken) | B (Grover-weakened) | L (classically broken)
+#                   | S (coverage-sentinel: informational, quantum_safety unknown)
+#   severity        accepted severity value(s)
+#   quantum_safety  accepted quantum_safety value(s)
+#   tier            floor = always gated (regex floor must catch it)
+#                   ast   = gated only when an AST runner is registered for
+#                           the file's language in the test binary
+#   rule_id_prefix  optional discriminator when one file must yield several
+#                   findings that share file+algorithm (x509 pubkey vs sig)
+# ----------------------------------------------------------------------------
+instances:
+  # ---- Bucket A: Shor-broken asymmetric crypto (critical / vulnerable) ----
+  - id: A1
+    file: src/python/keygen.py
+    line: 7
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A2
+    file: src/python/keygen.py
+    line: 11
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A3
+    file: src/python/keygen.py
+    line: 15
+    algorithm: [Ed25519, EdDSA]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A4
+    file: src/python/keygen.py
+    line: 19
+    algorithm: DSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A5
+    file: src/python/keygen.py
+    line: 23
+    algorithm: DH
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A6: RSA reached through the aliased import `asym_r` (line 3 import /
+  # line 28 call). Credit either an import-line rule or an AST call-site
+  # finding — file-level match, any line in the file counts.
+  - id: A6
+    file: src/python/keygen.py
+    line: null
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A7: hand-rolled textbook RSA (pure bigint, zero crypto imports). Recall
+  # now requires the PROMOTED multi-signal finding (rule_id_prefix
+  # HANDROLLED_): two distinct low-confidence signals — the
+  # PYTHON_HANDROLLED_RSA heuristic and the CRYPTO_FP_RSA_PUBLIC_EXPONENT
+  # constant fingerprint — must agree on RSA and fuse into one
+  # HANDROLLED_RSA_PROMOTED finding at severity high (scanner promote.go).
+  # The raw low/high signals themselves are covered by A28.
+  - id: A7
+    file: src/python/handrolled.py
+    line: null
+    algorithm: RSA
+    bucket: A
+    severity: high
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: HANDROLLED_
+  # A28: the raw hand-rolled/fingerprint signals in handrolled.py that feed
+  # the A7 promotion — PYTHON_HANDROLLED_RSA (severity high, modexp shape on
+  # several lines) and CRYPTO_FP_RSA_PUBLIC_EXPONENT (severity low, e=65537).
+  # File-level so strict precision accepts every raw signal line.
+  - id: A28
+    file: src/python/handrolled.py
+    line: null
+    algorithm: RSA
+    bucket: A
+    severity: [low, high]
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A8
+    file: src/python/embedded_key.py
+    line: 3
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A9
+    file: src/go/tlsserver.go
+    line: 15
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A10
+    file: src/go/tlsserver.go
+    line: 19
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A11
+    file: src/go/tlsserver.go
+    line: 23
+    algorithm: [Ed25519, EdDSA]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A12: classical TLS cipher-suite constant pinned in code.
+  - id: A12
+    file: src/go/tlsserver.go
+    line: 30
+    algorithm: [RSA, ECDH, TLS]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A13
+    file: src/js/auth.js
+    line: 6
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A14: EC keygen. MUST NOT be credited by an algorithm=RSA finding — the
+  # JS_NODE_CRYPTO_RSA rule firing on generateKeyPairSync('ec', ...) was a
+  # confirmed wrong-algorithm bug in the 2026-06-10 validation run.
+  - id: A14
+    file: src/js/auth.js
+    line: 10
+    algorithm: [ECDSA, EC, ECC]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A15: JWT RS256 (RSASSA-PKCS1-v1_5 with SHA-256).
+  - id: A15
+    file: src/js/auth.js
+    line: 14
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A16
+    file: src/js/auth.js
+    line: 18
+    algorithm: [ECDH, ECDSA]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A17
+    file: src/java/LegacyAuth.java
+    line: 12
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A18
+    file: src/java/LegacyAuth.java
+    line: 18
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A19
+    file: src/java/LegacyAuth.java
+    line: 22
+    algorithm: [DH, DiffieHellman]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A20
+    file: src/csharp/Crypto.cs
+    line: 7
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A21
+    file: src/csharp/Crypto.cs
+    line: 9
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A22: ssl_ciphers ECDHE-RSA-...:ECDHE-ECDSA-... — the genuinely
+  # quantum-vulnerable line of nginx.conf (line 8 is the forbidden FP).
+  - id: A22
+    file: config/nginx.conf
+    line: 9
+    algorithm: [RSA, ECDSA, ECDH, TLS]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A23
+    file: config/sshd_config
+    line: 2
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A24
+    file: config/sshd_config
+    line: 3
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  - id: A25
+    file: config/sshd_config
+    line: 6
+    algorithm: [ECDH, DH]
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+  # A26a/A26b: at-rest certificate. The x509 detector must report BOTH the
+  # subject public key algorithm and the signature algorithm; rule_id_prefix
+  # keeps the two instances from being satisfied by a single finding.
+  - id: A26a
+    file: certs/server-rsa.pem
+    line: null
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: X509_CERT_PUBKEY_
+  - id: A26b
+    file: certs/server-rsa.pem
+    line: null
+    algorithm: RSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: X509_CERT_SIG_
+  - id: A27a
+    file: certs/server-ecdsa.pem
+    line: null
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: X509_CERT_PUBKEY_
+  - id: A27b
+    file: certs/server-ecdsa.pem
+    line: null
+    algorithm: ECDSA
+    bucket: A
+    severity: critical
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: X509_CERT_SIG_
+  # A29-A31: hand-rolled finite-field Diffie-Hellman on math/big (RFC 3526
+  # 2048-bit MODP prime + big.Int modular exponentiation, zero crypto
+  # imports). Three findings are required:
+  #   A29 — the MODP prime constant fingerprint (a MODP prime IS DH): high
+  #         severity on its own, pinned to the const line.
+  #   A30 — the promoted multi-signal finding (HANDROLLED_DH_PROMOTED): the
+  #         RSA/DH-ambiguous modexp signal corroborates the DH fingerprint
+  #         and the fused finding adopts the dominant signal's algorithm.
+  #   A31 — the raw GO_BIGINT_MODEXP signals (labeled RSA at low confidence
+  #         by convention — modexp is RSA/DH-ambiguous); file-level and
+  #         algorithm [RSA, DH] so strict precision accepts both Exp() lines.
+  - id: A29
+    file: src/go/handrolled_dh.go
+    line: 10
+    algorithm: DH
+    bucket: A
+    severity: high
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: CRYPTO_FP_MODP
+  - id: A30
+    file: src/go/handrolled_dh.go
+    line: null
+    algorithm: DH
+    bucket: A
+    severity: high
+    quantum_safety: vulnerable
+    tier: floor
+    rule_id_prefix: HANDROLLED_
+  - id: A31
+    file: src/go/handrolled_dh.go
+    line: null
+    algorithm: [RSA, DH]
+    bucket: A
+    severity: low
+    quantum_safety: vulnerable
+    tier: floor
+
+  # ---- Bucket B: Grover-weakened symmetric strength (medium) ----
+  # B1: AES-128 via PyCryptodome — the 16-byte key is on line 9, the AES.new
+  # call on line 10. Discriminating 128 vs 256 needs key-length dataflow, so
+  # this is tier ast: gated only when a Python AST runner is registered.
+  - id: B1
+    file: src/python/symmetric.py
+    line: 10
+    algorithm: [AES-128, AES128, AES]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: ast
+  - id: B2
+    file: src/python/symmetric.py
+    line: 23
+    algorithm: [3DES, TripleDES, DESede]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: floor
+  - id: B3
+    file: src/js/auth.js
+    line: 24
+    algorithm: [AES-128, AES128]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: floor
+  # B4: DESede is 3DES. MUST NOT be credited by an algorithm=DES finding —
+  # JAVA_DES_CIPHER labeling DESede as single-DES was a confirmed bug.
+  - id: B4
+    file: src/java/LegacyAuth.java
+    line: 26
+    algorithm: [3DES, TripleDES, DESede]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: floor
+  - id: B5
+    file: src/csharp/Crypto.cs
+    line: 11
+    algorithm: [3DES, TripleDES]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: floor
+  - id: B6
+    file: config/sshd_config
+    line: 9
+    algorithm: [AES-128, AES128]
+    bucket: B
+    severity: medium
+    quantum_safety: grover_weakened
+    tier: floor
+  # B7/B8a/B8b: hand-rolled SHA-256 (textbook K table + IV, zero crypto
+  # imports). B8a/B8b pin the two constant fingerprints individually; B7
+  # requires the promoted multi-signal finding (HANDROLLED_SHA256_PROMOTED,
+  # severity high — hand-rolling is the risk; Grover only sets the tier).
+  - id: B7
+    file: src/js/handrolled_sha256.js
+    line: null
+    algorithm: [SHA-256, SHA256]
+    bucket: B
+    severity: high
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: HANDROLLED_
+  - id: B8a
+    file: src/js/handrolled_sha256.js
+    line: 5
+    algorithm: [SHA-256, SHA256]
+    bucket: B
+    severity: low
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: CRYPTO_FP_SHA256_K
+  - id: B8b
+    file: src/js/handrolled_sha256.js
+    line: 10
+    algorithm: [SHA-256, SHA256]
+    bucket: B
+    severity: low
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: CRYPTO_FP_SHA256_IV
+  # B9/B10a/B10b: hand-rolled AES (forward + inverse S-box tables, zero
+  # crypto imports). Key size is unknowable from the tables alone, so
+  # grover_weakened is the correct conservative tier. B10a/B10b pin the two
+  # S-box fingerprints; B9 requires the promoted finding.
+  - id: B9
+    file: src/python/handrolled_aes.py
+    line: null
+    algorithm: AES
+    bucket: B
+    severity: high
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: HANDROLLED_
+  - id: B10a
+    file: src/python/handrolled_aes.py
+    line: 4
+    algorithm: AES
+    bucket: B
+    severity: low
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: CRYPTO_FP_AES_SBOX
+  - id: B10b
+    file: src/python/handrolled_aes.py
+    line: 10
+    algorithm: AES
+    bucket: B
+    severity: low
+    quantum_safety: grover_weakened
+    tier: floor
+    rule_id_prefix: CRYPTO_FP_AES_INV_SBOX
+
+  # ---- Bucket L: classically broken regardless of quantum (high/critical) ----
+  - id: L1
+    file: src/python/symmetric.py
+    line: 29
+    algorithm: MD5
+    bucket: L
+    severity: [high, critical]
+    quantum_safety: classically_broken
+    tier: floor
+  - id: L2
+    file: src/python/symmetric.py
+    line: 33
+    algorithm: [SHA1, SHA-1]
+    bucket: L
+    severity: [high, critical]
+    quantum_safety: classically_broken
+    tier: floor
+  - id: L3
+    file: src/js/auth.js
+    line: 34
+    algorithm: MD5
+    bucket: L
+    severity: [high, critical]
+    quantum_safety: classically_broken
+    tier: floor
+  - id: L4
+    file: src/java/LegacyAuth.java
+    line: 30
+    algorithm: RC4
+    bucket: L
+    severity: [high, critical]
+    quantum_safety: classically_broken
+    tier: floor
+  - id: L5
+    file: src/java/LegacyAuth.java
+    line: 34
+    algorithm: [SHA1, SHA-1]
+    bucket: L
+    severity: [high, critical]
+    quantum_safety: classically_broken
+    tier: floor
+
+  # ---- Bucket S: coverage sentinel (informational, quantum_safety unknown) ----
+  # S1: M2Crypto reached through an EVP API surface NO rule recognizes
+  # (EVP.MessageDigest('ripemd160')). The scanner must not stay silent: the
+  # coverage sentinel (scanner sentinel.go) emits exactly one info-severity
+  # CRYPTO_API_UNMAPPED finding pinned to the import line, flagging the file
+  # as a possible coverage gap. If a real M2Crypto/EVP rule ever lands, this
+  # instance flips to a MISS — replace it with a proper bucket-A/B/L instance
+  # and move the sentinel proof to a still-unmapped API surface.
+  - id: S1
+    file: src/python/unmapped_lib.py
+    line: 2
+    algorithm: UNKNOWN
+    bucket: S
+    severity: info
+    quantum_safety: unknown
+    tier: floor
+    rule_id_prefix: CRYPTO_API_UNMAPPED
+
+# ----------------------------------------------------------------------------
+# forbidden — locations where NO risk-tagged finding (quantum_safety of
+# vulnerable / grover_weakened / classically_broken) may appear (bucket C).
+#
+#   line: null        = the whole file
+#   line + line_end   = inclusive range
+#   allow             = optional escape hatch: findings whose quantum_safety is
+#                       in allow.quantum_safety AND whose severity is <=
+#                       allow.max_severity are tolerated here (and are exempt
+#                       from the strict-precision check).
+# ----------------------------------------------------------------------------
+forbidden:
+  - file: src/python/pqc.py
+    line: null
+    reason: "liboqs ML-KEM-768 / ML-DSA-65 / SPHINCS+ — NIST-standardized PQC; flagging any of it as vulnerable is a product-credibility bug"
+  - file: src/python/symmetric.py
+    line: 17
+    reason: "AES-256 (32-byte key, line 16) — Grover-resistant at 256-bit; a naive AES.new() rule that cannot see key size must not fire here"
+  - file: src/python/symmetric.py
+    line: 37
+    reason: "hashlib.sha256 — must not be flagged vulnerable at severity medium+; an informational Grover note at low/info is acceptable"
+    allow:
+      quantum_safety: [vulnerable, grover_weakened, unknown]
+      max_severity: low
+  - file: src/python/symmetric.py
+    line: 41
+    reason: "SHA3-512 — quantum-safe hash"
+  - file: src/go/tlsserver.go
+    line: 38
+    reason: "X25519MLKEM768 hybrid key exchange — a finding tagged hybrid at info/low is allowed; vulnerable is not"
+    allow:
+      quantum_safety: [hybrid]
+      max_severity: low
+  - file: src/go/tlsserver.go
+    line: 43
+    line_end: 50
+    reason: "cloudflare/circl kyber768 KEM usage — post-quantum, must not be flagged"
+  - file: src/js/auth.js
+    line: 29
+    reason: "aes-256-gcm — Grover-resistant at 256-bit"
+  - file: src/csharp/Crypto.cs
+    line: 15
+    line_end: 18
+    reason: "Aes.Create() with KeySize = 256 — Grover-resistant at 256-bit"
+  - file: src/csharp/Crypto.cs
+    line: 20
+    reason: "SHA-512 — quantum-safe hash"
+  - file: config/nginx.conf
+    line: 8
+    reason: "ssl_protocols TLSv1.2 TLSv1.3 — already-compliant line; regression pin for the NGINX_SSL_PROTOCOLS_DEPRECATED prefix-match false positive (TLSv1 matching inside TLSv1.2)"
+
+# ----------------------------------------------------------------------------
+# policy_excluded — files the walker excludes by design. Not gated in either
+# direction: no recall is required and any findings that do appear (e.g. if a
+# future --include-vendored mode flips the default) are ignored by the
+# precision check rather than reported as extras.
+# ----------------------------------------------------------------------------
+policy_excluded:
+  - file: vendor/legacylib/sign.py
+    reason: "walker skips vendored dirs by default (suppression defaultExcludes); vendored RSA keygen is intentionally outside the gate"
+
+# ----------------------------------------------------------------------------
+# deps — expected dependency-scan (pkg/sbom Ingest) results.
+#
+#   expect.algorithms_include: for each listed algorithm there must be >=1
+#     risk-tagged finding (quantum_safety in the risk set) for that package in
+#     that manifest. Supersets are fine.
+#   must_not_flag: the package must produce ZERO risk-tagged findings.
+#     Informational PQ-ready findings (quantum_safety=quantum_safe, e.g. the
+#     KB's deliberate circl classification) are allowed and not extras.
+# ----------------------------------------------------------------------------
+deps:
+  expect:
+    - manifest: requirements.txt
+      ecosystem: python
+      package: pycryptodome
+      algorithms_include: [RSA, ECDSA]
+    - manifest: requirements.txt
+      ecosystem: python
+      package: rsa
+      algorithms_include: [RSA]
+    - manifest: requirements.txt
+      ecosystem: python
+      package: ecdsa
+      algorithms_include: [ECDSA]
+    - manifest: requirements.txt
+      ecosystem: python
+      package: paramiko
+      algorithms_include: [RSA, ECDSA]
+    - manifest: package.json
+      ecosystem: javascript
+      package: jsonwebtoken
+      algorithms_include: [RSA, ECDSA]
+    - manifest: package.json
+      ecosystem: javascript
+      package: node-rsa
+      algorithms_include: [RSA]
+    - manifest: package.json
+      ecosystem: javascript
+      package: elliptic
+      algorithms_include: [ECDSA]
+  must_not_flag:
+    - manifest: requirements.txt
+      package: liboqs-python
+      reason: "PQC library — must never be flagged as risk"
+    - manifest: requirements.txt
+      package: requests
+      reason: "no crypto primitives of its own"
+    - manifest: package.json
+      package: express
+      reason: "no crypto primitives of its own"
+    - manifest: go.mod
+      package: github.com/cloudflare/circl
+      reason: "deliberately classified PQ-ready in the knowledge base; informational quantum_safe findings allowed, risk-tagged findings are not"

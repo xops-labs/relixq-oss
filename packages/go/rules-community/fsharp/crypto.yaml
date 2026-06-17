@@ -1,0 +1,391 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# F# crypto rules
+#
+# F# shares the .NET BCL crypto surface (`System.Security.Cryptography`) with
+# C#; the only relevant differences for static detection are F# syntax:
+#   - `let x = new AesManaged()` rather than `var x = new AesManaged();`
+#   - Property mutation uses the `<-` token, e.g. `cipher.KeySize <- 1024`.
+#   - No trailing semicolons; module / nested-let scoping.
+# These rules are regex-only for this batch. A long-term Roslyn-dual-register
+# path (re-use the C# Roslyn AST runner against F# via FSharp.Compiler.Service
+# or the F# tooling MSBuildWorkspace) is left as a future upgrade.
+#
+# Rule-ID prefix: FSHARP_
+
+# ---------------------------------------------------------------------------
+# Namespace import — inventory surface
+# ---------------------------------------------------------------------------
+- id: FSHARP_MD5_SERVICEPROVIDER
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `let hasher = new MD5CryptoServiceProvider()` — direct instantiation of
+  # the legacy MD5 implementation class.
+  detector:
+    type: regex
+    pattern: 'new\s+MD5CryptoServiceProvider\s*\('
+  message: "MD5CryptoServiceProvider instantiation in F# — MD5 is cryptographically broken (collision attacks since 2004)."
+  recommendation: "Replace MD5 with SHA-256 (or SHA-3 / BLAKE2 for new code) via `SHA256.Create()`. For password hashing use Argon2id or PBKDF2 with high iteration counts."
+  cwe: [328, 327]
+  confidence: 0.9
+- id: FSHARP_MD5_CREATE
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `MD5.Create()` factory call.
+  detector:
+    type: regex
+    pattern: 'MD5\.Create\s*\(\s*\)'
+  message: "`MD5.Create()` in F# — MD5 hash factory; algorithm is broken for any security-relevant use."
+  recommendation: "Switch to `SHA256.Create()` or `SHA3_256.Create()` (NET 8+) for general hashing; use Argon2id / PBKDF2 for password storage."
+  cwe: [328, 327]
+  confidence: 0.9
+- id: FSHARP_HASHLIB_MD5_WRAPPER
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # F# community-style hashing wrapper: `Hashlib.Md5`. Common pattern when
+  # functional codebases wrap BCL primitives behind module accessors.
+  detector:
+    type: regex
+    pattern: 'Hashlib\.Md5\b'
+  message: "`Hashlib.Md5` accessor in F# — exposes broken MD5 hashing primitive through a module facade."
+  recommendation: "Retire the `Hashlib.Md5` accessor; replace callers with a SHA-256 wrapper and remove the MD5 surface entirely."
+  cwe: [328]
+  confidence: 0.75
+# ---------------------------------------------------------------------------
+# Weak hashes — SHA-1
+# ---------------------------------------------------------------------------
+- id: FSHARP_SHA1_SERVICEPROVIDER
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'new\s+SHA1CryptoServiceProvider\s*\('
+  message: "SHA1CryptoServiceProvider instantiation in F# — SHA-1 is cryptographically broken (SHAttered 2017)."
+  recommendation: "Replace SHA-1 with SHA-256 / SHA-3-256 via `SHA256.Create()`. For HMAC use HMAC-SHA256+."
+  cwe: [328, 327]
+  confidence: 0.9
+- id: FSHARP_SHA1_CREATE
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'SHA1\.Create\s*\(\s*\)'
+  message: "`SHA1.Create()` in F# — SHA-1 factory; algorithm is broken for collision-resistant use."
+  recommendation: "Switch to `SHA256.Create()` or stronger; do not use SHA-1 for digital signatures, certificates, or HMACs."
+  cwe: [328, 327]
+  confidence: 0.9
+- id: FSHARP_HASHLIB_SHA1_WRAPPER
+  language: fsharp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'Hashlib\.Sha1\b'
+  message: "`Hashlib.Sha1` accessor in F# — exposes broken SHA-1 hashing primitive through a module facade."
+  recommendation: "Retire the `Hashlib.Sha1` accessor; replace callers with a SHA-256 wrapper."
+  cwe: [328]
+  confidence: 0.75
+# ---------------------------------------------------------------------------
+# Weak symmetric ciphers — DES, 3DES, RC2
+# ---------------------------------------------------------------------------
+- id: FSHARP_DES_SERVICEPROVIDER
+  language: fsharp
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'new\s+DESCryptoServiceProvider\s*\('
+  message: "DESCryptoServiceProvider instantiation in F# — 56-bit DES is trivially brute-forceable."
+  recommendation: "Replace DES with AES-256-GCM. Use `AesGcm` (.NET 5+) or `Aes.Create()` with authenticated mode."
+  cwe: [327, 326]
+  confidence: 0.95
+- id: FSHARP_DES_CREATE
+  language: fsharp
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'DES\.Create\s*\('
+  message: "`DES.Create(...)` in F# — DES factory; 56-bit DES is obsolete and trivially broken."
+  recommendation: "Replace `DES.Create()` with `Aes.Create()` (preferably AES-256-GCM) for symmetric encryption."
+  cwe: [327, 326]
+  confidence: 0.95
+- id: FSHARP_TRIPLEDES_SERVICEPROVIDER
+  language: fsharp
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: 'new\s+TripleDESCryptoServiceProvider\s*\('
+  message: "TripleDESCryptoServiceProvider instantiation in F# — 3DES deprecated by NIST SP 800-131A (SWEET32 attack)."
+  recommendation: "Replace 3DES with AES-256-GCM; NIST deprecated 3DES for new applications as of 2017."
+  cwe: [327]
+  confidence: 0.9
+- id: FSHARP_TRIPLEDES_CREATE
+  language: fsharp
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: 'TripleDES\.Create\s*\('
+  message: "`TripleDES.Create(...)` in F# — 3DES is deprecated (SWEET32 block-size attack)."
+  recommendation: "Replace `TripleDES.Create()` with `Aes.Create()`; do not introduce 3DES in new code."
+  cwe: [327]
+  confidence: 0.9
+- id: FSHARP_RC2_SERVICEPROVIDER
+  language: fsharp
+  category: weak-cipher
+  severity: critical
+  algorithm: RC2
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'new\s+RC2CryptoServiceProvider\s*\('
+  message: "RC2CryptoServiceProvider instantiation in F# — RC2 is broken (related-key + block-size weaknesses)."
+  recommendation: "Replace RC2 with AES-256-GCM via `Aes.Create()` and an authenticated mode."
+  cwe: [327, 326]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# RSA key sizes — 1024 (critical), 2048 (inventory)
+# ---------------------------------------------------------------------------
+- id: FSHARP_RSA_SERVICEPROVIDER_1024
+  language: fsharp
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: 'new\s+RSACryptoServiceProvider\s*\(\s*1024\b'
+  message: "RSACryptoServiceProvider(1024) in F# — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  recommendation: "Move to ML-KEM (FIPS 203) for KEM and ML-DSA (FIPS 204) for signatures. Until PQC migration ships, require RSA >= 3072-bit. Do not introduce new 1024-bit keys."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: FSHARP_RSA_SERVICEPROVIDER_2048
+  language: fsharp
+  category: weak-key
+  severity: info
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 2048
+  # Informational — 2048-bit RSA meets current classical guidance but is
+  # quantum-vulnerable. Surface for the non-PQ inventory rollup.
+  detector:
+    type: regex
+    pattern: 'new\s+RSACryptoServiceProvider\s*\(\s*2048\b'
+  message: "RSACryptoServiceProvider(2048) in F# — meets current classical guidance but quantum-vulnerable; tracked for PQC migration."
+  recommendation: "Plan migration to ML-KEM (FIPS 203) / ML-DSA (FIPS 204). For classical compatibility periods, document the algorithm and intended deprecation window."
+  cwe: [327]
+  confidence: 0.7
+- id: FSHARP_RSA_CREATE_1024
+  language: fsharp
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: 'RSA\.Create\s*\(\s*1024\s*\)'
+  message: "`RSA.Create(1024)` in F# — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  recommendation: "Use `RSA.Create(3072)` minimum for transition windows; target ML-KEM / ML-DSA for new designs."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: FSHARP_RSA_CREATE_2048
+  language: fsharp
+  category: weak-key
+  severity: info
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: 'RSA\.Create\s*\(\s*2048\s*\)'
+  message: "`RSA.Create(2048)` in F# — meets classical guidance but quantum-vulnerable; tracked for PQC migration."
+  recommendation: "Plan migration to ML-KEM / ML-DSA per the PQC roadmap; document compatibility windows."
+  cwe: [327]
+  confidence: 0.7
+# ---------------------------------------------------------------------------
+# F# property mutation — `.KeySize <- N` with small N
+# ---------------------------------------------------------------------------
+- id: FSHARP_KEYSIZE_MUTATION_1024
+  language: fsharp
+  category: weak-key
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # F# uses `<-` for property/mutable assignment: `rsa.KeySize <- 1024`. The
+  # spaces around `<-` are optional but conventional.
+  detector:
+    type: regex
+    pattern: '\.KeySize\s*<-\s*1024\b'
+  message: "`.KeySize <- 1024` in F# — explicit mutation to a 1024-bit key; below NIST 2030 floor."
+  recommendation: "Set `.KeySize <- 3072` or stronger as a transition baseline; migrate the surrounding flow to ML-KEM / ML-DSA."
+  cwe: [326]
+  confidence: 0.9
+- id: FSHARP_KEYSIZE_MUTATION_512
+  language: fsharp
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 512
+  detector:
+    type: regex
+    pattern: '\.KeySize\s*<-\s*512\b'
+  message: "`.KeySize <- 512` in F# — 512-bit key is factorable on commodity hardware (broken classically)."
+  recommendation: "Never use 512-bit keys; minimum transitional baseline is RSA-3072. Target PQC primitives for production."
+  cwe: [326, 327]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# DSA — deprecated signature algorithm
+# ---------------------------------------------------------------------------
+- id: FSHARP_DSA_SERVICEPROVIDER
+  language: fsharp
+  category: deprecated-signature
+  severity: high
+  algorithm: DSA
+  usage_type: signature
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'new\s+DSACryptoServiceProvider\s*\('
+  message: "DSACryptoServiceProvider instantiation in F# — DSA deprecated by NIST SP 800-186 / FIPS 186-5."
+  recommendation: "Replace DSA with ML-DSA (FIPS 204) for signatures; for classical compatibility windows use ECDSA on P-384 or RSA-PSS with 3072+ bit keys, recognizing all are quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# TLS protocol selection — deprecated versions
+# ---------------------------------------------------------------------------
+- id: FSHARP_TLS_OLD_PROTOCOL
+  language: fsharp
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: transport
+  quantum_safety: vulnerable
+  # SecurityProtocolType.Ssl3 / Tls / Tls10 / Tls11 are all deprecated. The
+  # enum spelling `Tls` (no suffix) means TLS 1.0; we match `Tls$` only via the
+  # bare token form on the right of `.` — handled with an alternation that
+  # explicitly avoids Tls12 / Tls13.
+  detector:
+    type: regex
+    pattern: 'SecurityProtocolType\.(?:Ssl3|Tls10|Tls11)\b'
+  message: "Deprecated TLS protocol enum in F# (Ssl3 / Tls10 / Tls11)."
+  recommendation: "Require TLS 1.2 minimum (TLS 1.3 preferred). Use `SecurityProtocolType.Tls12 ||| SecurityProtocolType.Tls13`."
+  cwe: [326, 327]
+  confidence: 0.9
+- id: FSHARP_SERVICEPOINT_DEPRECATED_TLS
+  language: fsharp
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: transport
+  quantum_safety: vulnerable
+  # Pattern: `ServicePointManager.SecurityProtocol <- SecurityProtocolType.Tls`
+  # (bare Tls = TLS 1.0) or `... <- SecurityProtocolType.Tls11` / `Ssl3`. RE2
+  # has no negative lookahead, so we enumerate the deprecated suffixes
+  # explicitly and require a word boundary so `Tls12` / `Tls13` are excluded.
+  detector:
+    type: regex
+    pattern: 'ServicePointManager\.SecurityProtocol\s*<-\s*SecurityProtocolType\.(?:Ssl3|Tls10|Tls11|Tls)\b'
+  message: "`ServicePointManager.SecurityProtocol <- SecurityProtocolType.<deprecated>` in F#."
+  recommendation: "Set `ServicePointManager.SecurityProtocol <- SecurityProtocolType.Tls12 ||| SecurityProtocolType.Tls13`; prefer TLS 1.3."
+  cwe: [326, 327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Cipher mode / padding misuse
+# ---------------------------------------------------------------------------
+- id: FSHARP_CIPHER_MODE_ECB
+  language: fsharp
+  category: weak-cipher-mode
+  severity: high
+  algorithm: ECB
+  usage_type: encryption
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'CipherMode\.ECB\b'
+  message: "`CipherMode.ECB` in F# — ECB leaks structural plaintext patterns (the penguin attack)."
+  recommendation: "Use an authenticated mode: AES-GCM (`AesGcm`), AES-CCM, or at minimum CBC with HMAC-SHA256. Never ship ECB for any non-trivial payload."
+  cwe: [327, 922]
+  confidence: 0.95
+- id: FSHARP_PADDING_PKCS1
+  language: fsharp
+  category: deprecated-padding
+  severity: medium
+  algorithm: RSA-PKCS1v15
+  usage_type: encryption
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'PaddingMode\.PKCS1\b'
+  message: "`PaddingMode.PKCS1` in F# — PKCS#1 v1.5 padding is vulnerable to Bleichenbacher / oracle attacks; deprecated in favor of OAEP."
+  recommendation: "Use `RSAEncryptionPadding.OaepSHA256` (or stronger) and `RSASignaturePadding.Pss`. For PQC, migrate KEM workloads to ML-KEM (FIPS 203)."
+  cwe: [327, 780]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# RNG — legacy API
+# ---------------------------------------------------------------------------
+- id: FSHARP_RNG_LEGACY_API
+  language: fsharp
+  category: weak-rng
+  severity: info
+  algorithm: RNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `RNGCryptoServiceProvider()` is functionally OK (it wraps the OS CSPRNG)
+  # but the class is obsolete as of .NET 6 and replaced by
+  # `RandomNumberGenerator.Create()`. Surface for inventory.
+  detector:
+    type: regex
+    pattern: 'RNGCryptoServiceProvider\(\)'
+  message: "`RNGCryptoServiceProvider()` in F# — the class is obsoleted (.NET 6+) in favor of `RandomNumberGenerator.Create()`."
+  recommendation: "Replace `RNGCryptoServiceProvider()` with `RandomNumberGenerator.Create()`; behavior is identical, surface is maintained."
+  cwe: []
+  confidence: 0.5

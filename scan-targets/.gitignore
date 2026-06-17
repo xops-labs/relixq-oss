@@ -1,0 +1,5 @@
+# Anything dropped here is your code to scan — don't commit it.
+*
+# ...except these tracking files, so the mount point exists on a fresh clone.
+!.gitignore
+!README.md

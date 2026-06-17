@@ -1,0 +1,64 @@
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+vendor/
+
+# .NET
+obj/
+[Bb]in/
+*.user
+*.suo
+
+# Node / npm
+node_modules/
+*.tsbuildinfo
+.next/
+.turbo/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Local Go build-temp dir (GOTMPDIR workaround on Windows)
+.gotmp/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Scan output
+findings.jsonl
+*.findings.jsonl
+.relixq/
+
+# Optional external rule-pack overlay — migration-enrichment content. The
+# detection layer ships in rules-community/; this overlay is supplied separately
+# and is not part of this repo. The enrich overlay is a no-op without it.
+rules-rulepack/
+
+# Local config / secrets
+.env
+.env.local
+*.local
+# The *.local glob (case-insensitive on Windows) also matches this OSS
+# local-auth package directory, whose name ends in ".Local". It must ship in
+# the repo — the API references it and won't build without it. Re-include it.
+!packages/dotnet/RelixQ.Auth.Local/
+
+# Logs
+*.log

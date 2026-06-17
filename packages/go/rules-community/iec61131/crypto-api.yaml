@@ -1,0 +1,41 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: IEC61131_FB_RSA
+  language: iec61131
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:FUNCTION_BLOCK|FUNCTION)\\s+\\w*RSA\\w*\\b"
+    flags: "i"
+  message: "FUNCTION_BLOCK RSA — RSA is quantum-vulnerable (Shor's algorithm). Long-running ICS deployments are exactly where harvest-now-decrypt-later attacks are most relevant."
+  cwe: [327]
+  confidence: 0.85
+
+- id: IEC61131_CALL_RSA_GENERATE
+  language: iec61131
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA_(?:GenerateKey|GenKey|Sign|Verify|Encrypt|Decrypt|KeyPair)\\s*\\("
+  message: "RSA key-generation or signing call — quantum-vulnerable primitive on a long-lived control surface."
+  cwe: [327]
+  confidence: 0.9

@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# Slim relixq scanner image for CI / the GitHub Action. Build context = repo
+# root. Built CGO-off, so it ships the regex floor plus the pure-Go AST
+# detectors (Go, JS/TS, PHP) — fast to pull, no toolchain. The full AST surface
+# (C# Roslyn + tree-sitter) lives in the `docker compose` app image instead.
+FROM golang:1.25-bookworm AS build
+ARG VERSION=dev
+ARG COMMIT=unknown
+WORKDIR /src
+COPY packages/go ./packages/go
+RUN cd packages/go \
+ && CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X github.com/relix-q/relix-q/cmd/relixq/cmd.Version=${VERSION} -X github.com/relix-q/relix-q/cmd/relixq/cmd.Commit=${COMMIT}" \
+      -o /out/relixq ./cmd/relixq \
+ && CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+      -o /out/relixq-scan-code ./cmd/relixq-scan-code
+
+FROM debian:bookworm-slim
+# git: scan a cloned repo. ca-certificates: TLS for `relixq scan tls` + git.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/relixq /usr/local/bin/relixq
+COPY --from=build /out/relixq-scan-code /usr/local/bin/relixq-scan-code
+COPY packages/go/rules-community /opt/relixq/rules
+COPY github-action/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENV RELIXQ_SCANNER_BIN=/usr/local/bin/relixq-scan-code \
+    RELIXQ_RULE_DIR=/opt/relixq/rules
+WORKDIR /github/workspace
+# Default entrypoint is the CLI itself, so the image is useful directly:
+#   docker run --rm -v "$PWD:/src" ghcr.io/<owner>/relixq scan /src --format sarif
+# The GitHub Action overrides this with /entrypoint.sh (see github-action/).
+ENTRYPOINT ["relixq"]

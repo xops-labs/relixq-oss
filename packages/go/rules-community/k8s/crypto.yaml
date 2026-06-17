@@ -1,0 +1,269 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Kubernetes crypto rule pack.
+# All rules are regex over YAML manifests. Routing is via `language: yaml` +
+# basename-style file_globs. The current loader uses filepath.Match which does
+# not support `**`, so globs must be basename patterns.
+# Content disambiguation between K8s / Helm / Ansible relies on the regex
+# patterns themselves (apiVersion strings, module names, Sprig calls).
+- id: K8S_CERTMANAGER_RSA_1024
+  language: yaml
+  category: weak-key-size
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*size:\s*1024\b'
+  message: "cert-manager Issuer/ClusterIssuer mints an RSA key at 1024 bits."
+  recommendation: "Raise privateKey.size to 3072+ for short-lived certs or 4096 for long-lived; track PQC migration to ML-DSA when cert-manager adds support."
+  references:
+    - "https://cert-manager.io/docs/configuration/issuers/"
+  cwe: [326]
+  confidence: 0.6
+- id: K8S_CERTMANAGER_RSA_2048
+  language: yaml
+  category: weak-key-size
+  severity: medium
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 2048
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*size:\s*2048\b'
+  message: "cert-manager Issuer/ClusterIssuer mints an RSA-2048 key (below the 3072-bit modern minimum)."
+  recommendation: "Use size: 3072 or 4096; plan PQC hybrid issuance once supported."
+  references:
+    - "https://cert-manager.io/docs/configuration/issuers/"
+  cwe: [326]
+  confidence: 0.55
+- id: K8S_CERTMANAGER_ECDSA_WEAK_CURVE
+  language: yaml
+  category: weak-key-size
+  severity: high
+  algorithm: ECDSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 224
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*size:\s*224\b'
+  message: "cert-manager Issuer/ClusterIssuer uses ECDSA P-224 (below modern minimums)."
+  recommendation: "Use ECDSA P-256 or P-384 (size: 256 / 384)."
+  cwe: [326]
+  confidence: 0.7
+- id: K8S_CERTMANAGER_LONG_DURATION_NO_ROTATION
+  language: yaml
+  category: tls-config
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*duration:\s*(8760|17520|26280|35040|43800|52560|61320|70080)h\b'
+  message: "Certificate duration is >= 1 year; verify a rotation/renewBefore policy is in place."
+  recommendation: "Pair long durations with renewBefore (e.g. 720h) and a documented rotation policy."
+  confidence: 0.5
+- id: K8S_ISTIO_MTLS_PERMISSIVE
+  language: yaml
+  category: tls-config
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*mode:\s*PERMISSIVE\b'
+  message: "Istio PeerAuthentication allows PERMISSIVE mTLS (mixed plaintext + mTLS traffic accepted)."
+  recommendation: "Move to mode: STRICT once all clients support mTLS; PERMISSIVE is downgrade-attack surface."
+  references:
+    - "https://istio.io/latest/docs/reference/config/security/peer_authentication/"
+  cwe: [319]
+  confidence: 0.85
+- id: K8S_ISTIO_MTLS_DISABLED
+  language: yaml
+  category: tls-config
+  severity: critical
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*mode:\s*DISABLE\b'
+  message: "Istio PeerAuthentication or DestinationRule disables mTLS entirely."
+  recommendation: "Switch to STRICT mTLS; DISABLE leaves east-west traffic in plaintext."
+  cwe: [319]
+  confidence: 0.9
+- id: K8S_TLS_SECRET_EMBEDDED_KEY
+  language: yaml
+  category: hardcoded-key
+  severity: critical
+  algorithm: TLS
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*tls\.key:\s*[A-Za-z0-9+/=]{40,}'
+  message: "Kubernetes TLS Secret embeds a private key literal in YAML (base64 in tls.key)."
+  recommendation: "Source TLS material from cert-manager, ExternalSecrets, or sealed-secrets — never commit the raw key blob."
+  cwe: [798]
+  confidence: 0.9
+- id: K8S_OPAQUE_SECRET_PRIVATE_KEY
+  language: yaml
+  category: hardcoded-key
+  severity: high
+  algorithm: TLS
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*(private[_-]?key|rsa[_-]?key|[a-zA-Z0-9_-]+\.(pem|key))\s*:\s*[''"]?[A-Za-z0-9+/=]{40,}'
+    flags: i
+  message: "Opaque Secret stores a private-key-named field with an inline literal value."
+  recommendation: "Move key material out of the manifest into an external secret store (Vault, ExternalSecrets, sealed-secrets)."
+  cwe: [798]
+  confidence: 0.7
+- id: K8S_ENV_TLS_VERSION_DEPRECATED
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    # Two forms covered on a single line:
+    #   - inline:    `TLS_VERSION: "1.0"`
+    #   - env block: `name: TLS_VERSION` (the `value: "1.0"` on the next line is
+    #     flagged independently or noted by context in the finding UI).
+    type: regex
+    pattern: '\b(TLS_VERSION|MIN_TLS_VERSION|MINIMUM_TLS_VERSION|TLSVersion)\b\s*[:=]\s*[''"]?(1\.0|1\.1|TLSv1|TLSv1\.0|TLSv1\.1)[''"]?|^\s*-?\s*name\s*:\s*[''"]?(TLS_VERSION|MIN_TLS_VERSION|MINIMUM_TLS_VERSION|TLSVersion)[''"]?\s*$'
+    flags: i
+  message: "Pod/Deployment env references a TLS version variable (verify value is not 1.0 / 1.1)."
+  recommendation: "Set the minimum TLS version to 1.2; prefer 1.3."
+  cwe: [327]
+  confidence: 0.7
+- id: K8S_ENV_INSECURE_SKIP_TLS_VERIFY
+  language: yaml
+  category: weak-tls
+  severity: critical
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    # Matches inline `INSECURE_SKIP_TLS_VERIFY: true` AND env-block forms
+    # (`- name: INSECURE_SKIP_TLS_VERIFY`) on a single line each.
+    type: regex
+    pattern: '\b(INSECURE_SKIP_TLS_VERIFY|SKIP_TLS_VERIFY|TLS_INSECURE|TLS_SKIP_VERIFY)\b\s*[:=]\s*[''"]?(1|true|yes)[''"]?|^\s*-?\s*name\s*:\s*[''"]?(INSECURE_SKIP_TLS_VERIFY|SKIP_TLS_VERIFY|TLS_INSECURE|TLS_SKIP_VERIFY)[''"]?\s*$'
+    flags: i
+  message: "Container env disables TLS certificate verification (or references the skip-verify env var)."
+  recommendation: "Provide the right trust bundle and remove the skip flag; never disable verification in production."
+  cwe: [295]
+  confidence: 0.9
+- id: K8S_INGRESS_SSL_PROTOCOLS_DEPRECATED
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: 'nginx\.ingress\.kubernetes\.io/ssl-protocols.*?(TLSv1(\b|[^.])|TLSv1\.0|TLSv1\.1|SSLv2|SSLv3)'
+    flags: i
+  message: "Nginx Ingress annotation enables deprecated TLS protocols."
+  recommendation: "Restrict ssl-protocols to \"TLSv1.2 TLSv1.3\"."
+  cwe: [327]
+  confidence: 0.9
+- id: K8S_INGRESS_SSL_CIPHERS_WEAK
+  language: yaml
+  category: weak-cipher
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: 'nginx\.ingress\.kubernetes\.io/ssl-ciphers.*?(RC4|3DES|DES-CBC|MD5|NULL|EXPORT|aNULL|eNULL)'
+    flags: i
+  message: "Nginx Ingress annotation includes broken cipher suites (RC4/3DES/DES/MD5/NULL/EXPORT)."
+  recommendation: "Restrict ssl-ciphers to AEAD suites (AES-GCM, ChaCha20-Poly1305) under TLS 1.2+ or rely on TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.95
+- id: K8S_INGRESS_SSL_PASSTHROUGH
+  language: yaml
+  category: tls-config
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: 'nginx\.ingress\.kubernetes\.io/ssl-passthrough:\s*[''"]?true[''"]?'
+    flags: i
+  message: "Ingress uses ssl-passthrough — the proxy cannot inspect or upgrade TLS; verify the backend enforces modern TLS."
+  recommendation: "Audit the backing service's TLS config independently when ssl-passthrough is enabled."
+  confidence: 0.6
+- id: K8S_LINKERD_OPAQUE_PORTS
+  language: yaml
+  category: tls-config
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: 'config\.linkerd\.io/opaque-ports:'
+  message: "Linkerd opaque-ports annotation bypasses mesh TLS interception for the listed ports."
+  recommendation: "Confirm the listed ports either don't carry sensitive data or terminate TLS themselves."
+  confidence: 0.5
+- id: K8S_SERVICEMONITOR_INSECURE_SKIP_VERIFY
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*insecureSkipVerify:\s*true\b'
+  message: "Prometheus ServiceMonitor (or generic tlsConfig) disables TLS verification."
+  recommendation: "Provide a caFile / caSecret reference and remove insecureSkipVerify."
+  cwe: [295]
+  confidence: 0.9
+- id: K8S_GATEKEEPER_WEAK_HASH_REF
+  language: yaml
+  category: weak-hash
+  severity: medium
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '^\s*(bundle|policy|constraint)[A-Za-z]*Sha1\s*:'
+    flags: i
+  message: "OPA Gatekeeper / policy bundle references a SHA-1 hash."
+  recommendation: "Sign and verify bundles with SHA-256 (or stronger)."
+  cwe: [328]
+  confidence: 0.6

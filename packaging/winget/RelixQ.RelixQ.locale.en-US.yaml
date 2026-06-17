@@ -1,0 +1,27 @@
+PackageIdentifier: RelixQ.RelixQ
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Relix-Q
+PublisherUrl: https://relixq-website.vercel.app
+PublisherSupportUrl: https://github.com/xops-labs/relixq-oss/issues
+PackageName: Relix-Q Community
+PackageUrl: https://relixq-website.vercel.app
+License: Apache-2.0
+LicenseUrl: https://github.com/xops-labs/relixq-oss/blob/main/LICENSE
+ShortDescription: Scan code for quantum-vulnerable cryptography and report post-quantum readiness.
+Description: >-
+  Relix-Q is an open-source scanner for quantum-vulnerable cryptography. It
+  inventories weak and quantum-broken crypto across source code, dependencies,
+  TLS endpoints, and certificates, scores the risk, and exports findings as
+  JSON, SARIF, Markdown, or HTML for CI gating. This package is the command-line
+  scanner; the self-hosted web dashboard runs via Docker.
+Moniker: relixq
+Tags:
+  - cryptography
+  - post-quantum
+  - pqc
+  - security
+  - scanner
+  - sarif
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

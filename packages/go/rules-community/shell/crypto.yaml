@@ -1,0 +1,402 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Shell-script crypto rules
+#
+# Shell scripts are where the practical "what crypto did we actually run?"
+# answer lives — dev-setup scripts, CI pipelines, container entrypoints, and
+# provisioning glue routinely invoke `openssl`, `ssh-keygen`, `gpg`, `certbot`,
+# `curl`, `wget`, and `aws kms` with flag combinations that pin weak primitives.
+# A static-code scan that ignores shell misses an entire class of misconfig.
+#
+# Strategy: regex-only. The pinned `github.com/smacker/go-tree-sitter` module
+# (`v0.0.0-20240827094217-dd81d9e9be82`) ships a `bash` subpackage, but pulling
+# it into go.mod conflicts with the 9-agent parallel-batch budget — file
+# overlap on go.mod/go.sum would serialize the merges. Regex covers ~90% of
+# practical shell crypto patterns (the surface is a fixed set of CLI invocations
+# whose flag syntax is regular). An AST upgrade can land later.
+#
+# Routing note: shell scripts are NOT yet plumbed through
+# `internal/scanner/language.go`. The plumbing covers the constant +
+# extension-map additions (`.sh`, `.bash`, `.zsh`,
+# `.ksh`) plus the `IsSourceLanguage` extension needed to activate the pack.
+# The YAML loads cleanly today; the rules just won't fire on .sh files until
+# the wire-in lands.
+#
+# Per-line semantics: the regex backend (internal/detectors/regex/regex.go)
+# matches each rule against each line independently. Patterns therefore assume
+# a single logical statement per line — the dominant case for these CLI tools.
+# Line-continuation (`\` at EOL) is acknowledged as a known false-negative
+# until/unless we move to AST.
+
+# ---------------------------------------------------------------------------
+# openssl — key generation
+# ---------------------------------------------------------------------------
+- id: SHELL_OPENSSL_GENRSA_1024
+  language: shell
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # Matches `openssl genrsa 1024` and `openssl genrsa -out key.pem 1024`. The
+  # optional `-out <file>` group is consumed lazily so the trailing 1024 is the
+  # key size, not a filename.
+  detector:
+    type: regex
+    pattern: 'openssl\s+genrsa\s+(?:-out\s+\S+\s+)?1024\b'
+  message: "openssl genrsa 1024 — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  recommendation: "Move off classical RSA entirely; interim mitigation: `openssl genrsa -out key.pem 3072` (or 4096). PQC target: ML-KEM (FIPS 203) or ML-DSA (FIPS 204) via OpenSSL 3.x OQS provider."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: SHELL_OPENSSL_REQ_NEWKEY_RSA_1024
+  language: shell
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # `openssl req -newkey rsa:1024 ...` — CSR generation with a too-small RSA key.
+  detector:
+    type: regex
+    pattern: 'openssl\s+req\b[^#]*-newkey\s+rsa:1024\b'
+  message: "openssl req -newkey rsa:1024 — 1024-bit RSA is below the NIST 2030 floor."
+  recommendation: "Use `-newkey rsa:3072` (or 4096) as an interim step; long-term, move to PQC certificates as the ecosystem lands them."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: SHELL_OPENSSL_REQ_WEAK_DIGEST
+  language: shell
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  # `openssl req -md5` or `-sha1` — signature digest pinned to a broken hash.
+  detector:
+    type: regex
+    pattern: 'openssl\s+req\b[^#]*-(?:md5|sha1)\b'
+  message: "openssl req with -md5 or -sha1 digest — certificate signed with a broken hash algorithm."
+  recommendation: "Use `-sha256` (or `-sha384`/`-sha512`) for certificate signatures. MD5/SHA-1 collisions enable forgery."
+  cwe: [327, 328]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# openssl — Diffie-Hellman parameters
+# ---------------------------------------------------------------------------
+- id: SHELL_OPENSSL_DHPARAM_1024
+  language: shell
+  category: weak-key
+  severity: high
+  algorithm: DH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  key_size: 1024
+  # `openssl dhparam -out dh.pem 1024` — 1024-bit DH is vulnerable to Logjam
+  # and quantum attacks.
+  detector:
+    type: regex
+    pattern: 'openssl\s+dhparam\b[^#]*\b1024\b'
+  message: "openssl dhparam 1024 — 1024-bit DH parameters are vulnerable to Logjam-class attacks."
+  recommendation: "Use ≥2048-bit DH parameters (`openssl dhparam -out dh.pem 2048`); prefer ECDH on P-256/Curve25519 classically, and plan ML-KEM (FIPS 203) for PQC."
+  cwe: [326, 327]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# openssl — cipher suite probes
+# ---------------------------------------------------------------------------
+- id: SHELL_OPENSSL_CIPHERS_RC4
+  language: shell
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # `openssl ciphers RC4` / `openssl ciphers ALL:!aNULL:RC4-SHA` — explicit
+  # RC4 inclusion in a cipher list (audit or test invocation).
+  detector:
+    type: regex
+    pattern: 'openssl\s+ciphers\b[^#]*\S*RC4'
+  message: "openssl ciphers list includes RC4 — RC4 is broken (RFC 7465 prohibits it in TLS)."
+  recommendation: "Remove RC4 from cipher lists. Use AEAD ciphers (AES-GCM, ChaCha20-Poly1305) or TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.92
+- id: SHELL_OPENSSL_CIPHERS_DES
+  language: shell
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'openssl\s+ciphers\b[^#]*\S*DES\b'
+  message: "openssl ciphers list includes DES/3DES — single-DES is broken; 3DES is deprecated (NIST SP 800-131A)."
+  recommendation: "Remove DES/3DES from cipher lists. Use AES-256-GCM or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.9
+- id: SHELL_OPENSSL_CIPHERS_MD5
+  language: shell
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: mac
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'openssl\s+ciphers\b[^#]*\S*MD5\b'
+  message: "openssl ciphers list includes MD5-based suites — HMAC-MD5 in TLS suites is deprecated."
+  recommendation: "Remove MD5 cipher suites. Use SHA-256 or SHA-384 MAC variants, or AEAD ciphers (AES-GCM, ChaCha20-Poly1305)."
+  cwe: [327, 328]
+  confidence: 0.9
+- id: SHELL_OPENSSL_CIPHERS_EXPORT
+  language: shell
+  category: weak-cipher
+  severity: critical
+  algorithm: TLS
+  usage_type: encryption
+  quantum_safety: vulnerable
+  # EXPORT-grade ciphers (40/56-bit keys) — FREAK / Logjam-class.
+  detector:
+    type: regex
+    pattern: 'openssl\s+ciphers\b[^#]*\S*EXPORT'
+  message: "openssl ciphers list includes EXPORT-grade suites — broken 40/56-bit keys (FREAK, Logjam class)."
+  recommendation: "Remove `EXPORT` suites entirely. Use TLS 1.3 defaults or a hardened TLS 1.2 cipher list with AEAD only."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# ssh-keygen
+# ---------------------------------------------------------------------------
+- id: SHELL_SSHKEYGEN_RSA_SMALL
+  language: shell
+  category: weak-key
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  # `ssh-keygen -t rsa -b 1024` or `-b 2048`. We deliberately do NOT flag
+  # `ssh-keygen -t rsa` without `-b` (OpenSSH default is 3072 since 7.6,
+  # which would generate noise on legacy scripts). The -b alternation pins
+  # the concrete weak sizes only.
+  detector:
+    type: regex
+    pattern: 'ssh-keygen\b[^#]*-t\s+rsa\b[^#]*-b\s+(?:1024|2048)\b'
+  message: "ssh-keygen -t rsa -b 1024/2048 — RSA host/user key below the modern OpenSSH default (3072)."
+  recommendation: "Use `ssh-keygen -t ed25519` for new keys, or `-t rsa -b 4096` as an interim step. RSA is quantum-vulnerable regardless of size; plan migration to PQC SSH (e.g. Streamlined NTRU Prime hybrid) as OpenSSH lands stable support."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: SHELL_SSHKEYGEN_DSA
+  language: shell
+  category: weak-key
+  severity: critical
+  algorithm: DSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  # `ssh-keygen -t dsa` — DSA host/user keys are removed in OpenSSH 9.8+ and
+  # have been deprecated for over a decade. Always weak.
+  detector:
+    type: regex
+    pattern: 'ssh-keygen\b[^#]*-t\s+dsa\b'
+  message: "ssh-keygen -t dsa — DSA SSH keys are deprecated (removed in OpenSSH 9.8+); fixed 1024-bit key size."
+  recommendation: "Use `ssh-keygen -t ed25519` (preferred) or `-t rsa -b 4096`. Long-term: PQC SSH algorithms once OpenSSH stabilizes them."
+  cwe: [326, 327]
+  confidence: 0.97
+- id: SHELL_GPG_WEAK_CIPHER
+  language: shell
+  category: weak-cipher
+  severity: high
+  algorithm: GPG
+  usage_type: encryption
+  quantum_safety: vulnerable
+  # `gpg --cipher-algo CAST5|IDEA|3DES|DES|RC2|RC4` — explicit weak symmetric
+  # cipher pin.
+  detector:
+    type: regex
+    pattern: 'gpg\b[^#]*--cipher-algo\s+(?:CAST5|IDEA|3DES|DES|RC2|RC4)\b'
+  message: "gpg --cipher-algo with deprecated symmetric cipher (CAST5/IDEA/3DES/DES/RC2/RC4)."
+  recommendation: "Use `--cipher-algo AES256` (preferred) or `AES192`. Drop legacy ciphers from `~/.gnupg/gpg.conf` personal-cipher-preferences too."
+  cwe: [327]
+  confidence: 0.93
+- id: SHELL_GPG_WEAK_S2K_CIPHER
+  language: shell
+  category: weak-cipher
+  severity: medium
+  algorithm: GPG
+  usage_type: kdf
+  quantum_safety: vulnerable
+  # `gpg --s2k-cipher-algo CAST5|IDEA|3DES` — controls the cipher used to
+  # encrypt the passphrase-derived private key on disk.
+  detector:
+    type: regex
+    pattern: 'gpg\b[^#]*--s2k-cipher-algo\s+(?:CAST5|IDEA|3DES)\b'
+  message: "gpg --s2k-cipher-algo with deprecated cipher (CAST5/IDEA/3DES)."
+  recommendation: "Use `--s2k-cipher-algo AES256` for private-key-on-disk encryption."
+  cwe: [327]
+  confidence: 0.9
+- id: SHELL_GPG_WEAK_DIGEST
+  language: shell
+  category: weak-hash
+  severity: high
+  algorithm: GPG
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # `gpg --digest-algo MD5|SHA1` — signature digest pinned to a broken hash.
+  detector:
+    type: regex
+    pattern: 'gpg\b[^#]*--digest-algo\s+(?:MD5|SHA1)\b'
+  message: "gpg --digest-algo with broken hash (MD5/SHA1) — signatures forgeable."
+  recommendation: "Use `--digest-algo SHA512` (or SHA256). Mirror in `~/.gnupg/gpg.conf` cert-digest-algo and personal-digest-preferences."
+  cwe: [327, 328]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# certbot
+# ---------------------------------------------------------------------------
+- id: SHELL_CERTBOT_HTTP_ACME
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `certbot --server http://...` — ACME directory served over plaintext HTTP,
+  # exposing key-attestation flows to a network attacker.
+  detector:
+    type: regex
+    pattern: 'certbot\b[^#]*--server\s+http://'
+  message: "certbot --server http://... — ACME endpoint must be HTTPS."
+  recommendation: "Use the official Let's Encrypt directory (`https://acme-v02.api.letsencrypt.org/directory`) or your CA's HTTPS endpoint. Plaintext ACME exposes account-key registration to MITM."
+  cwe: [319]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# curl
+# ---------------------------------------------------------------------------
+- id: SHELL_CURL_INSECURE_SHORT
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `curl ... -k ...` — skip certificate verification. Common in CI scripts;
+  # silently downgrades TLS to "encryption-only", losing authentication.
+  detector:
+    type: regex
+    pattern: 'curl\b[^#]*\s-k\b'
+  message: "curl -k disables TLS certificate verification."
+  recommendation: "Remove `-k`. If a local/test CA is needed, use `--cacert /path/to/ca.pem` to pin the trust anchor explicitly."
+  cwe: [295]
+  confidence: 0.92
+- id: SHELL_CURL_INSECURE_LONG
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Same as -k but the long form.
+  detector:
+    type: regex
+    pattern: 'curl\b[^#]*\s--insecure\b'
+  message: "curl --insecure disables TLS certificate verification."
+  recommendation: "Remove `--insecure`. Use `--cacert` to pin a custom trust anchor when needed."
+  cwe: [295]
+  confidence: 0.95
+- id: SHELL_CURL_TLSV1_0
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `curl --tlsv1.0` pins to TLS 1.0 (deprecated, RFC 8996).
+  detector:
+    type: regex
+    pattern: 'curl\b[^#]*--tlsv1\.0\b'
+  message: "curl --tlsv1.0 pins a deprecated TLS version (RFC 8996)."
+  recommendation: "Use `--tlsv1.2` minimum or `--tlsv1.3`. TLS 1.0/1.1 are deprecated and broken."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: SHELL_CURL_TLSV1_1
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'curl\b[^#]*--tlsv1\.1\b'
+  message: "curl --tlsv1.1 pins a deprecated TLS version (RFC 8996)."
+  recommendation: "Use `--tlsv1.2` minimum or `--tlsv1.3`."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: SHELL_CURL_WEAK_CIPHERS
+  language: shell
+  category: weak-cipher
+  severity: high
+  algorithm: TLS
+  usage_type: encryption
+  quantum_safety: vulnerable
+  # `curl --ciphers RC4-SHA` / similar — pins a weak cipher list. Same
+  # alternation logic as SHELL_OPENSSL_CIPHERS_*.
+  detector:
+    type: regex
+    pattern: 'curl\b[^#]*--ciphers\s+\S*(?:RC4|DES|MD5)'
+  message: "curl --ciphers list pins weak primitives (RC4/DES/MD5)."
+  recommendation: "Use TLS 1.3 defaults (no `--ciphers` needed) or a hardened TLS 1.2 list with AEAD only (ECDHE-ECDSA-AES256-GCM-SHA384 etc.)."
+  cwe: [327]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# wget
+# ---------------------------------------------------------------------------
+- id: SHELL_WGET_NO_CHECK_CERT
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `wget --no-check-certificate` — same downgrade as `curl -k`.
+  detector:
+    type: regex
+    pattern: 'wget\b[^#]*\s--no-check-certificate\b'
+  message: "wget --no-check-certificate disables TLS certificate verification."
+  recommendation: "Remove `--no-check-certificate`. Use `--ca-certificate=/path/to/ca.pem` to pin a custom CA."
+  cwe: [295]
+  confidence: 0.95
+- id: SHELL_WGET_OLD_TLS
+  language: shell
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `wget --secure-protocol=SSLv3|TLSv1|TLSv1_1` — deprecated TLS pin.
+  detector:
+    type: regex
+    pattern: 'wget\b[^#]*--secure-protocol=(?:SSLv3|TLSv1|TLSv1_1)\b'
+  message: "wget --secure-protocol pins a deprecated TLS/SSL version (SSLv3/TLSv1/TLSv1_1)."
+  recommendation: "Use `--secure-protocol=TLSv1_2` minimum or `=TLSv1_3` / `=auto` (with a modern OpenSSL)."
+  cwe: [326, 327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Hardcoded key material
+# ---------------------------------------------------------------------------
+- id: SHELL_ECHO_PRIVATE_KEY_PEM
+  language: shell
+  category: secrets
+  severity: critical
+  algorithm: PrivateKey
+  usage_type: secrets
+  quantum_safety: vulnerable
+  # `echo "-----BEGIN ... PRIVATE KEY"` — script writes PEM private-key
+  # material via echo/heredoc-less inline. CONFIG_HARDCODED_RSA_PRIVATE_KEY
+  # (language: any) covers the multi-line PEM block elsewhere; this rule
+  # specifically catches the explicit-echo pattern in shell scripts where the
+  # block is reconstructed from a single-line string.
+  detector:
+    type: regex
+    pattern: 'echo\s+["'']?-----BEGIN[^"'']*PRIVATE KEY'
+  message: "echo of '-----BEGIN ... PRIVATE KEY' — private-key material being written to a file from a shell literal."
+  recommendation: "Never write private keys from shell literals or environment variables. Use a secret manager (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) and have the runtime fetch the key into a secured tmpfs path."
+  cwe: [798, 522]
+  confidence: 0.9

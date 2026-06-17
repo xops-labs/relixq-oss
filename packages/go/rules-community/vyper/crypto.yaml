@@ -1,0 +1,113 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Vyper crypto rules
+#
+# Vyper is a Pythonic alternative smart-contract language for the Ethereum
+# Virtual Machine. It compiles down to the same EVM bytecode as Solidity, so
+# the cryptographic surface area is identical:
+#   - ECDSA over secp256k1: `ecrecover` built-in resolves to the 0x01
+#     precompile; every externally-owned-account signature lands here.
+#   - Hashing: `keccak256` (Ethereum's SHA-3 variant) and `sha256` (precompile
+#     0x02) are the workhorses. RIPEMD-160 (0x03) and modexp (0x05) round out
+#     the crypto precompile set.
+#   - Modular exponentiation: precompile 0x05 powers BN-curve / BLS scalar
+#     work; same RSA-style quantum-vulnerability story as Solidity.
+# All of these are quantum-vulnerable. As of 2026 no production EVM chain
+# ships a PQC signature precompile; migration debt is enormous and the
+# recommendations below point to research-stage Falcon-512 / Dilithium /
+# SLH-DSA precompile proposals plus interim hybrid schemes implemented in
+# contract code.
+#
+# This rule pack is regex-only. There is no Tree-sitter Vyper grammar in the
+# smacker module pinned by go.mod, and Vyper's Python-like syntax is regular
+# enough that line-anchored regex catches the practical patterns.
+# The plan flagged Vyper as worth a dedicated pack
+# (rather than re-using Python rules via `file_globs`) because Solidity-style
+# rule IDs are more useful for blockchain-specific dashboarding and finding
+# triage than generic Python crypto findings.
+#
+# Vyper file convention: `.vy` source files, `#` line comments (Python-style),
+# `pragma version <range>` declarations at the top, function decorators like
+# `@external` / `@view`.
+
+# ---------------------------------------------------------------------------
+# Built-in crypto functions (resolve to EVM precompiles 0x01–0x05)
+# ---------------------------------------------------------------------------
+- id: VYPER_BLOCK_TIMESTAMP_RNG
+  language: vyper
+  category: weak-rng
+  severity: high
+  algorithm: WeakRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `block.timestamp` as an entropy source is the classic EVM RNG
+  # anti-pattern: proposers can influence it within tolerance, and any
+  # transaction in the same block sees the same value. Quantum-tangent
+  # because the vulnerability is structural rather than algorithmic, but
+  # PQC inventories often want to capture it because weak RNG is the
+  # most common precursor to broken key generation.
+  detector:
+    type: regex
+    pattern: '\bblock\.timestamp\b'
+  message: "block.timestamp referenced — predictable, proposer-influenceable; not suitable as a randomness or key-generation source."
+  recommendation: "Use a commit-reveal scheme or an external VRF (e.g. Chainlink VRF v2). Long-term, plan PQC-safe VRF based on lattice assumptions."
+  cwe: [338]
+  confidence: 0.75
+- id: VYPER_BLOCKHASH_RNG
+  language: vyper
+  category: weak-rng
+  severity: high
+  algorithm: WeakRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `blockhash(block.number - N)` as RNG — same predictable-RNG issue. The
+  # EVM only retains the last 256 block hashes so the input space is tiny.
+  detector:
+    type: regex
+    pattern: '\bblockhash\s*\('
+  message: "blockhash(...) — predictable, proposer-influenceable; not suitable as a randomness source."
+  recommendation: "Use Chainlink VRF or an equivalent verifiable randomness service."
+  cwe: [338]
+  confidence: 0.78
+- id: VYPER_SEND_NATIVE
+  language: vyper
+  category: weak-auth
+  severity: medium
+  algorithm: NativeTransfer
+  usage_type: value_transfer
+  quantum_safety: vulnerable
+  # Heuristic: `send(addr, amount)` at end-of-line. Vyper's `send()` is the
+  # gas-limited native-value transfer primitive; pairing it with weak
+  # signature checks or weak RNG is a recurring pattern in vulnerable
+  # contracts. Flag explicit `send()` calls so the inventory captures
+  # value-transfer paths that may be guarded by quantum-vulnerable
+  # signatures.
+  detector:
+    type: regex
+    pattern: '\bsend\s*\(\s*[^,]+,\s*\d+\s*\)\s*$'
+  message: "send(addr, amount) — gas-limited value transfer; review the surrounding signature / authorization checks for quantum-vulnerable primitives."
+  recommendation: "Audit the guard surrounding the send: if it is gated by ecrecover / ECDSA, plan PQC migration. Prefer `raw_call(..., value=...)` with explicit revert handling for new code."
+  cwe: [284]
+  confidence: 0.4
+# ---------------------------------------------------------------------------
+# Hardcoded private-key material
+# ---------------------------------------------------------------------------
+- id: VYPER_HARDCODED_PRIVATE_KEY
+  language: vyper
+  category: hardcoded-key
+  severity: critical
+  algorithm: PrivateKey
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  # Heuristic: `<name>: bytes32 = 0x<64 hex>` — a constant declaration in
+  # Vyper where the RHS is a full 32-byte literal. Catches embedded EOA
+  # secret-key material and similar smells. False-positive rate is
+  # acceptable because a 32-byte literal in source is itself a smell.
+  detector:
+    type: regex
+    pattern: 'bytes32\s*\)?\s*=\s*0x[0-9a-fA-F]{64}'
+  message: "Embedded bytes32 = 0x... literal — possible hardcoded private key or sensitive secret."
+  recommendation: "Never commit private-key material to source. Move to environment-injected deployment scripts or hardware-signer flows."
+  cwe: [798]
+  confidence: 0.7

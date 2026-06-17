@@ -1,0 +1,255 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Azure ARM (Resource Manager) template crypto rules
+#
+# ARM templates are Azure's native deployment format — JSON files that
+# declare resources like Microsoft.KeyVault, Microsoft.Storage,
+# Microsoft.Sql, Microsoft.Web. Bicep (a separate file extension /
+# language with its own rule pack) transpiles down to ARM, so any
+# shop large enough to standardize on Bicep still has ARM templates
+# circulating in CI artifacts, exported templates from the Portal, and
+# legacy projects. This pack targets the JSON form directly.
+#
+# Strategy: regex-only, anchored on canonical JSON syntax. ARM JSON is
+# verbose but single-line attribute style ("minimumTlsVersion":
+# "TLS1_0") is universal, so per-line regex catches the practical cases.
+# We use `language: json` and constrain via `file_globs` to ARM-shaped
+# file names — generic JSON (package.json, tsconfig.json, etc.) is
+# excluded by the globs. The globs match against both the basename
+# (per filepath.Match) and the full path, so deep-nested
+# templates/*/azuredeploy.json files are picked up.
+#
+# Coverage:
+#   - Microsoft.KeyVault/vaults/keys     — key type / size inventory
+#   - Microsoft.Network/applicationGateways — TLS minProtocolVersion
+#   - Microsoft.Network/frontDoors        — TLS policy
+#   - Microsoft.Storage/storageAccounts   — minimumTlsVersion
+#   - Microsoft.Sql/servers               — minimalTlsVersion
+#   - Microsoft.Web/sites                 — minTlsVersion
+#
+# All RSA / ECC-NIST key material is classified `quantum_safety:
+# vulnerable` regardless of bit-length. Azure Key Vault began offering
+# managed-HSM RSA up to 4096-bit and ECC P-256/P-384/P-521; PQC key
+# types (ML-KEM, ML-DSA) are tracked in Microsoft's roadmap but not yet
+# GA as of 2026.
+
+# ---------------------------------------------------------------------------
+# Microsoft.KeyVault/vaults/keys — key-type inventory
+# ---------------------------------------------------------------------------
+- id: ARM_KEYVAULT_RSA_KEY
+  language: json
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: key_management
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # In ARM JSON the key resource looks like:
+  #   "type": "Microsoft.KeyVault/vaults/keys",
+  #   "properties": { "kty": "RSA", "keySize": 2048, ... }
+  # Per-line regex catches the canonical single-line kty form. Variants:
+  # "kty": "RSA", "kty": "RSA-HSM" (HSM-backed) — both quantum-vulnerable.
+  detector:
+    type: regex
+    pattern: '"kty"\s*:\s*"RSA(-HSM)?"'
+  message: "Microsoft.KeyVault key uses kty=RSA — RSA is quantum-vulnerable (Shor) regardless of key size."
+  recommendation: "Track Azure Key Vault PQC roadmap. ML-KEM / ML-DSA key types are not yet GA in Key Vault as of 2026; plan migration when available, and use AKV for envelope encryption with PQC-protected data keys in the interim."
+  cwe: [327]
+  confidence: 0.95
+- id: ARM_KEYVAULT_EC_KEY
+  language: json
+  category: weak-crypto
+  severity: high
+  algorithm: ECC
+  usage_type: key_management
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # "kty": "EC" / "EC-HSM" with crv: P-256, P-384, P-521, P-256K — all
+  # quantum-vulnerable (Shor breaks the discrete log).
+  detector:
+    type: regex
+    pattern: '"kty"\s*:\s*"EC(-HSM)?"'
+  message: "Microsoft.KeyVault key uses kty=EC — elliptic-curve keys are quantum-vulnerable (Shor)."
+  recommendation: "Plan migration to ML-DSA-65 (signing) or ML-KEM-768 (encapsulation) once Key Vault exposes them as first-class key types."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Network/applicationGateways — sslPolicy / minProtocolVersion
+# ---------------------------------------------------------------------------
+- id: ARM_APPGW_TLS_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # ApplicationGateway sslPolicy can be Predefined (e.g.
+  # AppGwSslPolicy20150501 — TLS 1.0+) or Custom with explicit
+  # minProtocolVersion. Both TLSv1_0 and TLSv1_1 are deprecated.
+  detector:
+    type: regex
+    pattern: '"minProtocolVersion"\s*:\s*"TLSv1_(0|1)"'
+  message: "Application Gateway pins minProtocolVersion to TLS 1.0 or 1.1 — deprecated (RFC 8996)."
+  recommendation: "Set minProtocolVersion to TLSv1_2 or TLSv1_3 in the sslPolicy custom block."
+  cwe: [327]
+  confidence: 0.95
+- id: ARM_APPGW_PREDEFINED_POLICY_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # The 2015/2017 predefined sslPolicy names allow TLS 1.0/1.1. The
+  # 20220101 name (and later) is TLS 1.2-only.
+  detector:
+    type: regex
+    pattern: '"policyName"\s*:\s*"AppGwSslPolicy(20150501|20170401)"'
+  message: "Application Gateway uses a predefined sslPolicy that allows TLS 1.0/1.1."
+  recommendation: "Switch to AppGwSslPolicy20220101 (TLS 1.2 minimum) or a Custom policy with minProtocolVersion=TLSv1_2."
+  cwe: [327]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# Microsoft.Network/frontDoors / Microsoft.Cdn/profiles — minimumTlsVersion
+# ---------------------------------------------------------------------------
+- id: ARM_FRONTDOOR_TLS_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # Front Door minimumTlsVersion field can be "1.0" / "1.2".
+  detector:
+    type: regex
+    pattern: '"minimumTlsVersion"\s*:\s*"1\.0"'
+  message: "Front Door endpoint allows minimumTlsVersion=1.0 — deprecated."
+  recommendation: "Set minimumTlsVersion to 1.2 (the only secure value Front Door currently supports)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Storage/storageAccounts — minimumTlsVersion
+# ---------------------------------------------------------------------------
+- id: ARM_STORAGE_TLS_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # Storage Accounts use "TLS1_0", "TLS1_1", "TLS1_2" as the enum.
+  detector:
+    type: regex
+    pattern: '"minimumTlsVersion"\s*:\s*"TLS1_(0|1)"'
+  message: "Microsoft.Storage/storageAccounts allows minimumTlsVersion=TLS1_0 or TLS1_1 — deprecated."
+  recommendation: "Set minimumTlsVersion to TLS1_2 (currently the highest supported value for storage accounts)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Sql/servers — minimalTlsVersion (note the spelling: minimal not minimum)
+# ---------------------------------------------------------------------------
+- id: ARM_SQL_TLS_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # Microsoft.Sql/servers uses the unusual spelling "minimalTlsVersion"
+  # with dot-separated numeric values ("1.0", "1.1", "1.2", "1.3").
+  detector:
+    type: regex
+    pattern: '"minimalTlsVersion"\s*:\s*"1\.(0|1)"'
+  message: "Microsoft.Sql/servers pins minimalTlsVersion to 1.0 or 1.1 — deprecated."
+  recommendation: "Set minimalTlsVersion to '1.2' (or '1.3' where supported)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Microsoft.Web/sites — minTlsVersion (App Service)
+# ---------------------------------------------------------------------------
+- id: ARM_APPSERVICE_TLS_OLD
+  language: json
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.azuredeploy.json"
+    - "azuredeploy*.json"
+    - "arm-*.json"
+    - "**/templates/**/*.json"
+    - "**/arm-templates/**/*.json"
+    - "**/arm/**/*.json"
+    - "mainTemplate.json"
+    - "*.deploy.json"
+  # Microsoft.Web/sites uses "minTlsVersion": "1.0" | "1.1" | "1.2" | "1.3".
+  detector:
+    type: regex
+    pattern: '"minTlsVersion"\s*:\s*"1\.(0|1)"'
+  message: "App Service site pins minTlsVersion to 1.0 or 1.1 — deprecated."
+  recommendation: "Set minTlsVersion to '1.2' (or '1.3' where supported by the App Service plan)."
+  cwe: [327]
+  confidence: 0.95

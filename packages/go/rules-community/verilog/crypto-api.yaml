@@ -1,0 +1,99 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: VERILOG_MODULE_RSA_CORE
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "hardware_ip"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "module\\s+rsa_(?:core|accelerator|engine)\\b"
+  message: "RSA hardware IP core module declaration — quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.9
+
+- id: VERILOG_MODULE_ECDSA_CORE
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "hardware_ip"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "module\\s+ecdsa_(?:signer|verifier|core)\\b"
+  message: "ECDSA hardware IP core module declaration — quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.9
+
+- id: VERILOG_MODULE_ECC_CURVE
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECC"
+  usage_type: "hardware_ip"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "module\\s+ecc_(?:p256|p384|curve)\\b"
+  message: "ECC curve hardware module (P-256 / P-384 / generic) — quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.9
+
+- id: VERILOG_PARAM_RSA_SMALL_EXPONENT
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "constant"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "parameter\\s+(?:\\[[^\\]]+\\]\\s+)?\\w*EXPONENT\\w*\\s*=\\s*\\d+'h(?:3|5|11|13|17|10001)\\b"
+  message: "Parameter *EXPONENT* with small-RSA-exponent hex literal — inventory RSA signature-verification IP."
+  cwe: [327]
+  confidence: 0.7
+
+- id: VERILOG_PARAM_AES_SBOX
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "AES"
+  usage_type: "constant"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "parameter\\s+(?:\\[[^\\]]+\\]\\s+)?\\w*SBOX\\w*\\s*="
+  message: "Parameter *SBOX* — AES S-box ROM declaration; AES IP fingerprint."
+  confidence: 0.55
+
+- id: VERILOG_PORT_LEGACY_CRYPTO_OUTPUT
+  language: verilog
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "LegacyCrypto"
+  usage_type: "port"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "output\\s+\\[\\d+:0\\]\\s*(?:signature|cipher_text)\\b"
+  message: "Module output port emits signature / cipher_text — legacy crypto IP surface."
+  cwe: [327]
+  confidence: 0.75

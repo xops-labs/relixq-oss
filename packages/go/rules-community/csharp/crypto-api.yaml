@@ -1,0 +1,154 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: CSHARP_DSA_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\b(DSA\\.Create|new\\s+DSACryptoServiceProvider)\\b"
+  message: "DSA is quantum-vulnerable and rarely the right modern choice even classically."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'using var dsa = DSA.Create();'
+    no_match:
+      - 'using var ecdsa = ECDsa.Create();'
+
+- id: CSHARP_ECDSA_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bECDsa\\.Create\\s*\\("
+  message: "ECDSA detected. Elliptic-curve signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  examples:
+    match:
+      - 'using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);'
+    no_match:
+      - 'using var rsa = RSA.Create(2048);'
+
+- id: CSHARP_ECDH_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bECDiffieHellman\\.Create\\s*\\("
+  message: "ECDH detected. Elliptic-curve key exchange is quantum-vulnerable."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'using var ecdh = ECDiffieHellman.Create();'
+    no_match:
+      - 'using var ecdsa = ECDsa.Create();'
+
+- id: CSHARP_ECDH_PROVIDER
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bnew\s+ECDiffieHellman(Cng|OpenSsl)\b'
+  message: "ECDiffieHellmanCng/OpenSsl instantiated - elliptic-curve key exchange is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'var ecdh = new ECDiffieHellmanCng();'
+    no_match:
+      - 'using var ecdh = ECDiffieHellman.Create();'
+
+- id: CSHARP_RSA_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRSA\\.Create\\s*\\("
+  message: "RSA.Create detected. RSA is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'using var rsa = RSA.Create(2048);'
+    no_match:
+      - 'var rsa = new RSACryptoServiceProvider(2048);'
+
+- id: CSHARP_RSA_PROVIDER
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bnew\\s+RSACryptoServiceProvider\\b"
+  message: "RSACryptoServiceProvider instantiated. RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'var rsa = new RSACryptoServiceProvider(2048);'
+    no_match:
+      - 'using var rsa = RSA.Create(2048);'
+
+# Grover-tier symmetric: 3DES retains ~112-bit classical / ~57-bit quantum
+# effective strength and is SWEET32-weak; .NET marks it obsolete.
+- id: CSHARP_3DES
+  language: csharp
+  category: weak-cipher
+  severity: medium
+  algorithm: "3DES"
+  usage_type: "encryption"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '\b(TripleDES\.Create\s*\(|new\s+TripleDES(CryptoServiceProvider|Cng)\b)'
+  message: "TripleDES detected - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM (AesGcm or Aes.Create with KeySize = 256)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'using var tdes = TripleDES.Create();'
+    no_match:
+      - 'using var aes = Aes.Create();'

@@ -1,0 +1,414 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# AWS CloudFormation crypto rules
+#
+# CloudFormation is AWS's native IaC dialect. Unlike Terraform (where the
+# state of the world is rendered out as HCL), CloudFormation templates are
+# the *source* of every AWS-managed resource in a CFN-driven shop: KMS
+# keys, ACM certificates, ALB/CloudFront/API Gateway listeners, RDS
+# storage, S3 buckets, OpenSearch domains. Every line of crypto policy a
+# customer commits to AWS flows through one of these templates.
+#
+# CFN templates come in two file formats: YAML (more common, supports
+# anchors and short-form intrinsic functions like `!Ref`) and JSON
+# (legacy, machine-generated). The same logical resource — say,
+# `AWS::KMS::Key` — appears in either format with effectively the same
+# key/value pairs, just different surrounding punctuation. To avoid
+# duplicating every rule under both `language: yaml` and `language: json`,
+# this pack uses `language: any` + `file_globs` to filter to CFN-shaped
+# files only. The `file_globs` filter runs in the regex backend
+# (internal/detectors/regex.ruleAppliesToFile) AFTER the file's language
+# is detected, so `any` + globs works as expected: the rule attaches to
+# every file the scanner walks, then the glob check trims it to CFN
+# templates.
+#
+# Strategy: regex-only. We deliberately don't pull the cfn-lint Python
+# parser or a custom CFN AST library — those add subprocess / CGO weight
+# for marginal gain on the single-line attribute patterns that real CFN
+# templates use. Patterns target the canonical `KeySpec: RSA_2048` /
+# `"KeySpec": "RSA_2048"` form found in >95% of templates; YAML block
+# style and JSON object style both fit the same regex when we allow
+# `[: ]` between key and value.
+#
+# All RSA / ECC-NIST key material is classified `quantum_safety:
+# vulnerable` regardless of bit-length — Shor's algorithm breaks the
+# underlying assumption, not the size.
+
+# ---------------------------------------------------------------------------
+# Globs that identify a CFN template. We accept:
+#   - *.template.yaml / *.template.json (the AWS CDK / CloudFormation
+#     convention)
+#   - cloudformation/**/*.yaml / *.json (project-root folder convention)
+#   - cfn-*.yaml / cfn-*.json (filename prefix convention)
+#   - **/cfn/**/*.yaml / **/cfn/**/*.json (folder-anywhere convention)
+#   - **/cloudformation/**/*.yaml / *.json
+# These match against both the basename and the full relative path; the
+# matcher tries both per filepath.Match semantics.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# AWS::KMS::Key — key spec inventory (every non-PQ algorithm)
+# ---------------------------------------------------------------------------
+- id: CFN_KMS_RSA_KEY
+  language: any
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: kms
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # Matches both YAML (`KeySpec: RSA_2048`) and JSON (`"KeySpec":
+  # "RSA_2048"`) forms. The `[: ]` after the key handles either YAML's
+  # bare colon or JSON's quoted-colon-quoted; the optional quote around
+  # the value handles both. CFN spec lists: RSA_2048, RSA_3072, RSA_4096.
+  detector:
+    type: regex
+    pattern: '"?KeySpec"?\s*:\s*"?RSA_(2048|3072|4096)"?'
+  message: "AWS::KMS::Key uses an RSA KeySpec — RSA is quantum-vulnerable regardless of bit-length."
+  recommendation: "Track AWS KMS hybrid PQC roadmap (ML-KEM via the AWS Encryption SDK is already available for envelope encryption). Plan migration to ML-KEM-768 / ML-DSA-65 once KMS exposes them as first-class key specs."
+  cwe: [327]
+  confidence: 0.95
+- id: CFN_KMS_ECC_KEY
+  language: any
+  category: weak-crypto
+  severity: high
+  algorithm: ECC
+  usage_type: kms
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # CFN spec lists: ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521,
+  # ECC_SECG_P256K1. All quantum-vulnerable (Shor breaks the discrete
+  # log).
+  detector:
+    type: regex
+    pattern: '"?KeySpec"?\s*:\s*"?ECC_(NIST_P256|NIST_P384|NIST_P521|SECG_P256K1)"?'
+  message: "AWS::KMS::Key uses an ECC KeySpec — elliptic curves are quantum-vulnerable (Shor)."
+  recommendation: "Track AWS KMS PQC roadmap. Plan migration to ML-DSA-65 or SLH-DSA for signing keys, ML-KEM-768 for key-agreement use cases."
+  cwe: [327]
+  confidence: 0.95
+- id: CFN_KMS_KEY_MISSING_POLICY
+  language: any
+  category: misconfig
+  severity: medium
+  algorithm: KMS
+  usage_type: kms
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # Heuristic: the resource type declaration line on its own. The regex
+  # detector is per-line, so we can't see whether KeyPolicy is or isn't
+  # in the surrounding block. Instead we flag the resource type as
+  # "inventory + manual policy review needed". Confidence is low.
+  # Reviewers cross-check the surrounding block.
+  detector:
+    type: regex
+    pattern: '"?Type"?\s*:\s*"?AWS::KMS::Key"?'
+  message: "AWS::KMS::Key resource present — verify KeyPolicy is declared and grants least privilege."
+  recommendation: "Every AWS::KMS::Key should have an explicit KeyPolicy; absent policies default to the root account's principal, which is overly permissive in shared-account scenarios."
+  cwe: [732]
+  confidence: 0.3
+# ---------------------------------------------------------------------------
+# AWS::ACM::Certificate — algorithm inventory
+# ---------------------------------------------------------------------------
+- id: CFN_ACM_RSA_1024
+  language: any
+  category: weak-crypto
+  severity: critical
+  algorithm: RSA
+  usage_type: certificate
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # RSA-1024 is broken classically (achievable factoring). ACM allows
+  # KeyAlgorithm: RSA_1024, RSA_2048, EC_prime256v1, EC_secp384r1,
+  # EC_secp521r1. RSA_1024 is critical regardless of PQC.
+  detector:
+    type: regex
+    pattern: '"?KeyAlgorithm"?\s*:\s*"?RSA_1024"?'
+  message: "AWS::ACM::Certificate uses RSA_1024 — broken classically; replace immediately."
+  recommendation: "Use RSA_2048 minimum (still quantum-vulnerable, plan migration), or track ACM PQC support for ML-DSA-based certificates."
+  cwe: [327]
+  confidence: 0.99
+- id: CFN_ACM_RSA_KEY
+  language: any
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: certificate
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # RSA_2048 still quantum-vulnerable; classified high for inventory.
+  detector:
+    type: regex
+    pattern: '"?KeyAlgorithm"?\s*:\s*"?RSA_2048"?'
+  message: "AWS::ACM::Certificate uses RSA_2048 — quantum-vulnerable (Shor)."
+  recommendation: "Track ACM PQC support. ML-DSA-based certificates are not yet GA in ACM as of 2026; plan hybrid (RSA + ML-DSA) deployment when available."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# AWS::ElasticLoadBalancingV2::Listener — TLS policy
+# ---------------------------------------------------------------------------
+- id: CFN_ALB_SSL_POLICY_OLD
+  language: any
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # ELBSecurityPolicy-TLS-1-0-* and -TLS-1-1-* allow TLS 1.0 / 1.1 which
+  # are deprecated (RFC 8996). The recommended modern policy is
+  # ELBSecurityPolicy-TLS13-1-2-2021-06 or later.
+  detector:
+    type: regex
+    pattern: '"?SslPolicy"?\s*:\s*"?ELBSecurityPolicy-TLS-1-(0|1)-'
+  message: "ALB/NLB listener pins a deprecated SslPolicy (TLS 1.0 or 1.1 allowed)."
+  recommendation: "Use ELBSecurityPolicy-TLS13-1-2-2021-06 or ELBSecurityPolicy-TLS13-1-3-2021-06 to require TLS 1.2+ / 1.3."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS::CloudFront::Distribution — minimum protocol version
+# ---------------------------------------------------------------------------
+- id: CFN_CLOUDFRONT_TLS_OLD
+  language: any
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # CloudFront MinimumProtocolVersion options include SSLv3, TLSv1,
+  # TLSv1_2016, TLSv1.1_2016, TLSv1.2_2018, TLSv1.2_2019, TLSv1.2_2021.
+  # SSLv3 / TLSv1 / TLSv1_2016 are deprecated.
+  detector:
+    type: regex
+    pattern: '"?MinimumProtocolVersion"?\s*:\s*"?(SSLv3|TLSv1|TLSv1_2016|TLSv1\.1_2016)"?'
+  message: "CloudFront distribution allows a deprecated minimum protocol version (SSLv3 / TLSv1 / TLSv1.1)."
+  recommendation: "Set MinimumProtocolVersion to TLSv1.2_2021 or TLSv1.3_2022 (when available in your region)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS::ApiGateway::DomainName / AWS::ApiGatewayV2::DomainName — TLS policy
+# ---------------------------------------------------------------------------
+- id: CFN_APIGW_TLS_OLD
+  language: any
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # SecurityPolicy values: TLS_1_0 (deprecated), TLS_1_2.
+  detector:
+    type: regex
+    pattern: '"?SecurityPolicy"?\s*:\s*"?TLS_1_0"?'
+  message: "API Gateway DomainName pins SecurityPolicy=TLS_1_0 — deprecated."
+  recommendation: "Use SecurityPolicy: TLS_1_2 (the only other valid value in v1; ApiGatewayV2 currently auto-negotiates TLS 1.2+)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS::RDS::DBInstance — at-rest encryption
+# ---------------------------------------------------------------------------
+- id: CFN_RDS_ENCRYPTION_DISABLED
+  language: any
+  category: misconfig
+  severity: high
+  algorithm: AES
+  usage_type: at_rest_encryption
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # StorageEncrypted defaults to false for non-Aurora engines. Explicit
+  # false is a strong signal of misconfiguration.
+  detector:
+    type: regex
+    pattern: '"?StorageEncrypted"?\s*:\s*"?false"?'
+  message: "AWS::RDS::DBInstance has StorageEncrypted=false — at-rest encryption disabled."
+  recommendation: "Set StorageEncrypted: true and supply a KmsKeyId (or rely on the AWS-managed aws/rds key)."
+  cwe: [311]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS::S3::Bucket — explicit absence of BucketEncryption
+# ---------------------------------------------------------------------------
+- id: CFN_S3_ENCRYPTION_MISSING
+  language: any
+  category: misconfig
+  severity: medium
+  algorithm: AES
+  usage_type: at_rest_encryption
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # Heuristic: AWS::S3::Bucket type declaration. Per-line regex can't
+  # tell if BucketEncryption is in the surrounding block. We surface the
+  # resource at low confidence so a reviewer can verify default SSE-S3
+  # is acceptable (AWS now defaults SSE-S3 on new buckets, but the
+  # template should still declare BucketEncryption explicitly for
+  # auditability).
+  detector:
+    type: regex
+    pattern: '"?Type"?\s*:\s*"?AWS::S3::Bucket"?'
+  message: "AWS::S3::Bucket resource present — verify BucketEncryption is declared (AES256 or aws:kms)."
+  recommendation: "Even though AWS S3 now defaults to SSE-S3, declare BucketEncryption explicitly for auditability and to switch to SSE-KMS if compliance requires."
+  cwe: [311]
+  confidence: 0.3
+# ---------------------------------------------------------------------------
+# AWS::OpenSearchService::Domain — TLS policy
+# ---------------------------------------------------------------------------
+- id: CFN_OPENSEARCH_TLS_OLD
+  language: any
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "*.template.yaml"
+    - "*.template.yml"
+    - "*.template.json"
+    - "cfn-*.yaml"
+    - "cfn-*.yml"
+    - "cfn-*.json"
+    - "cloudformation/**/*.yaml"
+    - "cloudformation/**/*.yml"
+    - "cloudformation/**/*.json"
+    - "**/cloudformation/**/*.yaml"
+    - "**/cloudformation/**/*.json"
+    - "**/cfn/**/*.yaml"
+    - "**/cfn/**/*.json"
+  # TLSSecurityPolicy values: Policy-Min-TLS-1-0-2019-07,
+  # Policy-Min-TLS-1-2-2019-07, Policy-Min-TLS-1-2-PFS-2023-10.
+  detector:
+    type: regex
+    pattern: '"?TLSSecurityPolicy"?\s*:\s*"?Policy-Min-TLS-1-0-'
+  message: "OpenSearch domain pins TLSSecurityPolicy that allows TLS 1.0."
+  recommendation: "Use Policy-Min-TLS-1-2-PFS-2023-10 (or the latest available) to require TLS 1.2+ with PFS."
+  cwe: [327]
+  confidence: 0.95

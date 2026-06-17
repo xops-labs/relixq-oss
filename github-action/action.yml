@@ -1,0 +1,56 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+name: 'Relix-Q PQC Scan'
+description: 'Scan code, dependencies, or TLS endpoints for quantum-vulnerable cryptography and emit SARIF for GitHub Code Scanning.'
+author: 'Yasvanth Udayakumar'
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  scan-type:
+    description: 'What to scan: code | deps | tls.'
+    required: false
+    default: 'code'
+  path:
+    description: 'Path to scan (scan-type code/deps).'
+    required: false
+    default: '.'
+  target:
+    description: "For scan-type=tls: one or more host[:port], space-separated."
+    required: false
+    default: ''
+  format:
+    description: 'Output format (sarif recommended for Code Scanning).'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Output file path (relative to the workspace).'
+    required: false
+    default: 'relixq.sarif'
+  severity-threshold:
+    description: 'Drop findings below this severity (info|low|medium|high|critical).'
+    required: false
+    default: 'medium'
+  fail-on:
+    description: 'Fail the job if any finding meets or exceeds this severity. Empty = never fail (report-only).'
+    required: false
+    default: ''
+  baseline:
+    description: 'Optional baseline file; report only findings absent from it.'
+    required: false
+    default: ''
+
+outputs:
+  sarif:
+    description: 'Path to the SARIF file produced (pass to github/codeql-action/upload-sarif).'
+
+runs:
+  using: 'docker'
+  # Pinned to the released scanner image published by the release workflow
+  # (.github/workflows/release.yml) on every vX.Y.Z tag. The image's default
+  # entrypoint is the `relixq` CLI; the Action overrides it with the
+  # input-driven wrapper. Release prep bumps this pin to the version about to
+  # be tagged (see docs/RELEASE.md), so `github-action@vX.Y.Z` runs image X.Y.Z.
+  image: 'docker://ghcr.io/xops-labs/relixq:0.1.0'
+  entrypoint: '/entrypoint.sh'
