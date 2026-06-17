@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: relixq
-        uses: xops-labs/relixq-oss/github-action@v0.3.0   # pin to a release tag
+        uses: xops-labs/relixq-oss/github-action@v0.1.0   # pin to a release tag
         with:
           scan-type: code
           severity-threshold: medium
@@ -63,5 +63,5 @@ detectors (Go, JS/TS); full AST (C# Roslyn + tree-sitter) is available in the
 CLI.
 
 > **Note:** `action.yml` pins the image to the release version matching the
-> Action's own tag, so `github-action@v0.3.0` runs scanner image `0.3.0` - no
+> Action's own tag, so `github-action@v0.1.0` runs scanner image `0.1.0` - no
 > local build, and reproducible CI as long as you pin the `uses:` ref to a tag.

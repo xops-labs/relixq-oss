@@ -3,12 +3,12 @@ VERIFICATION
 This package downloads the official Relix-Q Community MSI installer, mirrored
 from the project's release on the website:
 
-  https://relixq-website.vercel.app/downloads/relixq_0.3.0_windows_amd64.msi
+  https://relixq-website.vercel.app/downloads/relixq_0.1.0_windows_amd64.msi
 
 SHA256: 42F50A8C8F73FC799882A4CAC9CA8E58DDD0168BD8915C25313C09CB4392345C
 
 The same checksum is published alongside the file at:
-  https://relixq-website.vercel.app/downloads/relixq_0.3.0_windows_amd64.msi.sha256
+  https://relixq-website.vercel.app/downloads/relixq_0.1.0_windows_amd64.msi.sha256
 
 To verify the downloaded installer matches:
   Get-FileHash <path-to.msi> -Algorithm SHA256
@@ -17,4 +17,4 @@ MSI identity:
   ProductName  Relix-Q Community
   ProductCode  {8AE9F50D-5319-477E-83F3-6B119471B410}
   UpgradeCode  {C1D036D9-3018-4D0E-97B8-535DE52B0AE2}
-  Version      0.3.0
+  Version      0.1.0

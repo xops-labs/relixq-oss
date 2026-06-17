@@ -44,7 +44,7 @@ relixq version
 moderation (the MSI URL must stay publicly reachable).
 ```powershell
 choco apikey --key <KEY> --source https://push.chocolatey.org/
-choco push relixq.0.3.0.nupkg --source https://push.chocolatey.org/
+choco push relixq.0.1.0.nupkg --source https://push.chocolatey.org/
 ```
 
 ## CLI — winget (`packaging/winget`)
@@ -60,7 +60,7 @@ winget install --manifest packaging/winget
 
 **Publish (GA):** open a PR to
 [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) placing the
-three files under `manifests/r/RelixQ/RelixQ/0.3.0/` (or use `wingetcreate`).
+three files under `manifests/r/RelixQ/RelixQ/0.1.0/` (or use `wingetcreate`).
 Goes through automated + human moderation; the installer URL must be public.
 
 ## Before publishing publicly — confirm these

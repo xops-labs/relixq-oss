@@ -1,5 +1,5 @@
 # Release automation for Relix-Q Community. Triggered by version tags
-# (v0.3.0, v1.0.0-rc1, ...). Runs the Go test suite, then in parallel:
+# (v0.1.0, v1.0.0-rc1, ...). Runs the Go test suite, then in parallel:
 #   - goreleaser: per-platform archives (zip/tar.gz) bundling relixq +
 #     relixq-scan-code + the community rules, deb/rpm packages, SHA256
 #     checksums, and the GitHub Release itself

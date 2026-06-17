@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>relixq</id>
-    <version>0.3.0</version>
+    <version>0.1.0</version>
     <packageSourceUrl>https://github.com/xops-labs/relixq-oss/tree/main/packaging/chocolatey</packageSourceUrl>
     <owners>xops-labs</owners>
     <title>Relix-Q Community (CLI)</title>
@@ -25,7 +25,7 @@ This package installs the `relixq` command-line scanner (the Windows MSI). For
 the self-hosted web dashboard, run the Docker stack instead — see
 https://relixq-website.vercel.app/#download.
     </description>
-    <releaseNotes>https://github.com/xops-labs/relixq-oss/releases/tag/v0.3.0</releaseNotes>
+    <releaseNotes>https://github.com/xops-labs/relixq-oss/releases/tag/v0.1.0</releaseNotes>
   </metadata>
   <files>
     <file src="tools\**" target="tools" />

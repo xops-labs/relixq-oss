@@ -52,5 +52,5 @@ runs:
   # entrypoint is the `relixq` CLI; the Action overrides it with the
   # input-driven wrapper. Release prep bumps this pin to the version about to
   # be tagged (see docs/RELEASE.md), so `github-action@vX.Y.Z` runs image X.Y.Z.
-  image: 'docker://ghcr.io/xops-labs/relixq:0.3.0'
+  image: 'docker://ghcr.io/xops-labs/relixq:0.1.0'
   entrypoint: '/entrypoint.sh'

@@ -29,11 +29,11 @@ tagged `main` + `sha-<short>`. `latest` always points at the latest release.
 # 1. Release prep (on main, via PR like any other change):
 #    - CHANGELOG.md: move [Unreleased] entries under the new version heading
 #    - github-action/action.yml: bump the image pin to the version you are
-#      about to tag (e.g. ghcr.io/xops-labs/relixq:0.3.0) so
-#      github-action@v0.3.0 runs scanner image 0.3.0
+#      about to tag (e.g. ghcr.io/xops-labs/relixq:0.1.0) so
+#      github-action@v0.1.0 runs scanner image 0.1.0
 # 2. Tag and push:
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.1.0
+git push origin v0.1.0
 # 3. Watch the Release workflow; the GitHub Release appears when it finishes.
 ```
 

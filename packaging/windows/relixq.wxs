@@ -10,8 +10,8 @@
 
   Example:
     wix build packaging/windows/relixq.wxs -arch x64 \
-      -d StageDir=dist/msi-stage -d Version=0.3.0 \
-      -o dist/relixq_0.3.0_windows_amd64.msi
+      -d StageDir=dist/msi-stage -d Version=0.1.0 \
+      -o dist/relixq_0.1.0_windows_amd64.msi
 
   The UpgradeCode is permanent — never change it, or upgrades will install
   side-by-side instead of replacing the previous version.

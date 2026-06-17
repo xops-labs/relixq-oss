@@ -39,12 +39,12 @@
 No clone, no build, no Docker. Grab the archive for your platform from
 [**Releases**](https://github.com/xops-labs/relixq-oss/releases/latest), extract, and scan —
 the `relixq` CLI, the scanner engine, and the community rules are bundled together,
-so one command works out of the box. (Replace `0.3.0` below with the latest release version.)
+so one command works out of the box. (Replace `0.1.0` below with the latest release version.)
 
 **Windows (PowerShell)** — or use the `.msi` installer, which puts `relixq` on your `PATH`:
 
 ```powershell
-$V = "0.3.0"
+$V = "0.1.0"
 irm "https://github.com/xops-labs/relixq-oss/releases/download/v$V/relixq_${V}_windows_amd64.zip" -OutFile relixq.zip
 Expand-Archive relixq.zip -DestinationPath "$env:LOCALAPPDATA\RelixQ"
 & "$env:LOCALAPPDATA\RelixQ\relixq.exe" scan C:\path\to\your\repo
@@ -53,7 +53,7 @@ Expand-Archive relixq.zip -DestinationPath "$env:LOCALAPPDATA\RelixQ"
 **macOS / Linux** — archives: `linux_amd64`, `darwin_amd64` (Intel), `darwin_arm64` (Apple Silicon):
 
 ```bash
-V=0.3.0
+V=0.1.0
 curl -fsSLO "https://github.com/xops-labs/relixq-oss/releases/download/v$V/relixq_${V}_linux_amd64.tar.gz"
 mkdir -p ~/relixq && tar -xzf "relixq_${V}_linux_amd64.tar.gz" -C ~/relixq
 ~/relixq/relixq scan /path/to/your/repo
@@ -74,7 +74,7 @@ docker run --rm -v "$PWD:/src" ghcr.io/xops-labs/relixq:latest scan /src
 (full example: [`docs/ci-examples/github.yml`](docs/ci-examples/github.yml)):
 
 ```yaml
-- uses: xops-labs/relixq-oss/github-action@v0.3.0
+- uses: xops-labs/relixq-oss/github-action@v0.1.0
   with:
     scan-type: code
 ```

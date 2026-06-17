@@ -1,6 +1,6 @@
 {
   "name": "relixq-oss",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Relix-Q OSS — JavaScript/TypeScript workspace root. Hosts the OSS npm packages (packages/npm/*) and the canonical OSS web app (apps/web).",
   "license": "Apache-2.0",
