@@ -1,0 +1,50 @@
+# Example: gate pull requests on new quantum-vulnerable cryptography.
+#
+# Copy this to .github/workflows/relixq.yml in your repository. The scan emits
+# SARIF; uploading it to GitHub Code Scanning is what produces the inline PR
+# annotations, so the upload step needs `security-events: write`.
+name: Relix-Q PQC scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write   # required for upload-sarif (PR annotations)
+
+jobs:
+  scan-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: relixq
+        uses: xops-labs/relixq-oss/github-action@v0.3.0   # pin to a release tag
+        with:
+          scan-type: code
+          severity-threshold: medium
+          # fail-on: high          # uncomment to block the build on high/critical findings
+          # baseline: .relixq-baseline.json   # report only NEW findings vs a committed baseline
+
+      - name: Upload SARIF
+        if: always()               # upload even when fail-on tripped a non-zero exit
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.relixq.outputs.sarif }}
+
+  # Optional: also scan declared dependencies.
+  scan-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: relixq
+        uses: xops-labs/relixq-oss/github-action@v0.3.0
+        with:
+          scan-type: deps
+      - if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.relixq.outputs.sarif }}
+          category: relixq-deps    # distinct category so code + deps results coexist

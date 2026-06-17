@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+- id: PYTHON_HASHLIB_SHA1
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: 'call:hashlib.sha1'
+  message: "hashlib.sha1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use hashlib.sha256 or hashlib.sha3_256."
+  cwe: [328]
+  confidence: 0.95
+- id: PYTHON_HASHLIB_MD5
+  language: python
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: 'call:hashlib.md5'
+  message: "hashlib.md5 is cryptographically broken."
+  recommendation: "Use hashlib.sha256 or hashlib.sha3_256."
+  cwe: [328]
+  confidence: 0.95

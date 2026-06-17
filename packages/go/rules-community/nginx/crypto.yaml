@@ -1,0 +1,309 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Nginx TLS configuration rules
+#
+# Nginx HTTPS posture is concentrated in a handful of `ssl_*` directives that
+# sit at the public TLS terminator. Misconfiguration here is *the* most
+# exposed PQC-adjacent surface — TLS 1.0/1.1, RC4/DES/3DES, weak DH params,
+# non-NIST curves all show up as visible-to-attacker handshake parameters.
+#
+# All rules use the regex detector and are scoped to nginx configuration files
+# via the rule-level `file_globs` field AND a custom `language: nginx`
+# constant. The dual gate (language + globs) keeps these rules from firing on
+# arbitrary *.conf files (which DetectLanguage routes to LangINI / LangYAML)
+# while staying parser-free.
+- id: NGINX_SSL_PROTOCOLS_DEPRECATED
+  language: nginx
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  # The deprecated tokens must terminate at whitespace/';'/EOL so the "TLSv1"
+  # prefix of TLSv1.2 / TLSv1.3 can never match (RE2-safe, no lookahead).
+  detector:
+    type: regex
+    pattern: '^\s*ssl_protocols\b[^;#]*\b(SSLv2|SSLv3|TLSv1(\.1)?)([ \t;]|$)'
+    flags: i
+  message: "nginx ssl_protocols pins a deprecated TLS/SSL version."
+  recommendation: "Restrict ssl_protocols to TLSv1.2 TLSv1.3 (preferring TLSv1.3-only where clients permit)."
+  references:
+    - "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_protocols"
+    - "https://datatracker.ietf.org/doc/html/rfc8996"
+  cwe: [327, 326]
+  confidence: 0.95
+  examples:
+    match:
+      - 'ssl_protocols TLSv1 TLSv1.1;'
+      - 'ssl_protocols SSLv3;'
+    no_match:
+      - 'ssl_protocols TLSv1.2 TLSv1.3;'
+# Classical key exchange in the cipher list is the PQC-relevant finding even
+# when every suite is classically "strong": ECDHE/DHE/RSA key establishment is
+# Shor-broken, so harvest-now-decrypt-later applies to every byte it protects.
+- id: NGINX_SSL_CIPHERS_CLASSICAL_KX
+  language: nginx
+  category: weak-tls
+  severity: critical
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;#]*\b(ECDHE|DHE|ECDH|DH|RSA|ECDSA)\b'
+  message: "nginx ssl_ciphers pins TLS suites with classical key exchange / authentication (ECDHE/DHE/RSA/ECDSA) - quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Enable TLS 1.3 and hybrid key exchange (X25519MLKEM768) at the terminator; classical-only cipher lists need a PQC migration plan."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'ssl_ciphers ECDHE-RSA-AES256-GCM-SHA384;'
+    no_match:
+      - 'ssl_ciphers TLS_AES_256_GCM_SHA384;'
+- id: NGINX_SSL_CIPHERS_RC4
+  language: nginx
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;]*\bRC4\b'
+    flags: i
+  message: "nginx ssl_ciphers references the broken RC4 stream cipher."
+  recommendation: "Remove RC4. Use AEAD ciphers (AES-GCM, ChaCha20-Poly1305) or TLS 1.3 defaults."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc7465"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'ssl_ciphers RC4-SHA:HIGH;'
+    no_match:
+      - 'ssl_ciphers HIGH:!aNULL;'
+- id: NGINX_SSL_CIPHERS_DES_3DES
+  language: nginx
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;]*\b(3DES|DES-CBC3|DES_CBC3|DES\b)'
+    flags: i
+  message: "nginx ssl_ciphers references DES/3DES (vulnerable to SWEET32 birthday attacks)."
+  recommendation: "Remove DES/3DES cipher suites. Use AES-GCM or ChaCha20-Poly1305."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'ssl_ciphers DES-CBC3-SHA;'
+    no_match:
+      - 'ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384;'
+- id: NGINX_SSL_CIPHERS_MD5
+  language: nginx
+  category: weak-cipher
+  severity: high
+  algorithm: MD5
+  usage_type: integrity
+  quantum_safety: classically_broken
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;]*\bMD5\b'
+    flags: i
+  message: "nginx ssl_ciphers references MD5-based MAC cipher suites."
+  recommendation: "Remove MD5-based cipher suites. Prefer SHA-256+ AEAD suites or TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'ssl_ciphers RC4-MD5;'
+    no_match:
+      - 'ssl_ciphers HIGH:!aNULL:!eNULL;'
+- id: NGINX_SSL_CIPHERS_EXPORT_LOW
+  language: nginx
+  category: weak-cipher
+  severity: critical
+  algorithm: EXPORT
+  usage_type: encryption
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;]*\b(EXPORT|EXP-|LOW|MEDIUM)\b'
+    flags: i
+  message: "nginx ssl_ciphers includes EXPORT/LOW/MEDIUM cipher classes (FREAK / Logjam exposure)."
+  recommendation: "Drop EXPORT/LOW/MEDIUM classes. Use an explicit modern cipher list or TLS 1.3 defaults."
+  references:
+    - "https://weakdh.org/"
+    - "https://freakattack.com/"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'ssl_ciphers LOW:!aNULL;'
+    no_match:
+      - 'ssl_ciphers HIGH:!aNULL;'
+- id: NGINX_SSL_CIPHERS_CBC_ONLY
+  language: nginx
+  category: weak-cipher
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ciphers\b[^;]*\bAES(128|256)-SHA\b'
+    flags: i
+  message: "nginx ssl_ciphers references CBC-mode AES suites without AEAD (e.g. AES256-SHA, AES128-SHA)."
+  recommendation: "Replace CBC-mode suites with AEAD: ECDHE-*-AES*-GCM-SHA*, ECDHE-*-CHACHA20-POLY1305, or rely on TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.7
+  examples:
+    match:
+      - 'ssl_ciphers AES256-SHA:AES128-SHA;'
+    no_match:
+      - 'ssl_ciphers AES256-SHA384;'
+- id: NGINX_SSL_DH_1024
+  language: nginx
+  category: weak-key
+  severity: high
+  algorithm: DH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  key_size: 1024
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_dhparam\s+[^;]*(dhparam[-_]?1024|dh1024|1024[-_]?dh)'
+    flags: i
+  message: "nginx ssl_dhparam points at a 1024-bit DH parameter file (Logjam exposure)."
+  recommendation: "Generate fresh 2048-bit (or 4096-bit) DH parameters: openssl dhparam -out dhparam-2048.pem 2048."
+  references:
+    - "https://weakdh.org/"
+  cwe: [326]
+  confidence: 0.85
+  examples:
+    match:
+      - 'ssl_dhparam /etc/nginx/dhparam-1024.pem;'
+    no_match:
+      - 'ssl_dhparam /etc/nginx/dhparam-4096.pem;'
+- id: NGINX_SSL_ECDH_CURVE_DEPRECATED
+  language: nginx
+  category: weak-curve
+  severity: high
+  algorithm: ECDH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_ecdh_curve\s+[^;]*\b(secp256k1|secp192r1|secp224r1|sect163k1|sect163r2|sect233k1|sect233r1)\b'
+    flags: i
+  message: "nginx ssl_ecdh_curve uses a deprecated / non-NIST curve."
+  recommendation: "Use X25519, secp256r1 (prime256v1), or secp384r1. Avoid secp256k1 (Bitcoin curve, not standardized for TLS)."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'ssl_ecdh_curve secp192r1;'
+    no_match:
+      - 'ssl_ecdh_curve X25519:prime256v1;'
+- id: NGINX_PREFER_SERVER_CIPHERS_OFF
+  language: nginx
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_prefer_server_ciphers\s+off\s*;'
+    flags: i
+  message: "nginx ssl_prefer_server_ciphers is off — clients may negotiate a weaker cipher than the server prefers."
+  recommendation: "Set ssl_prefer_server_ciphers on; when ssl_protocols still allows TLS 1.2 (irrelevant under TLS 1.3-only)."
+  cwe: [757]
+  confidence: 0.7
+  examples:
+    match:
+      - 'ssl_prefer_server_ciphers off;'
+    no_match:
+      - 'ssl_prefer_server_ciphers on;'
+- id: NGINX_SSL_SESSION_TICKETS_NO_ROTATION
+  language: nginx
+  category: misconfig
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_session_tickets\s+on\s*;'
+    flags: i
+  message: "nginx ssl_session_tickets is enabled — verify ssl_session_ticket_key is rotated regularly."
+  recommendation: "Either disable session tickets (ssl_session_tickets off;) or supply a rotated ssl_session_ticket_key file."
+  references:
+    - "https://blog.filippo.io/we-need-to-talk-about-session-tickets/"
+  cwe: [320]
+  confidence: 0.5
+  examples:
+    match:
+      - 'ssl_session_tickets on;'
+    no_match:
+      - 'ssl_session_tickets off;'
+- id: NGINX_PROXY_SSL_PROTOCOLS_DEPRECATED
+  language: nginx
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  # Same terminator anchoring as NGINX_SSL_PROTOCOLS_DEPRECATED: TLSv1/TLSv1.1
+  # must be whole tokens so TLSv1.2/TLSv1.3 never match.
+  detector:
+    type: regex
+    pattern: '^\s*proxy_ssl_protocols\b[^;#]*\b(SSLv2|SSLv3|TLSv1(\.1)?)([ \t;]|$)'
+    flags: i
+  message: "nginx proxy_ssl_protocols pins a deprecated TLS version for upstream traffic."
+  recommendation: "Restrict proxy_ssl_protocols to TLSv1.2 TLSv1.3."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'proxy_ssl_protocols TLSv1 TLSv1.1;'
+    no_match:
+      - 'proxy_ssl_protocols TLSv1.2 TLSv1.3;'
+- id: NGINX_SSL_CERT_KEY_INSECURE_PATH
+  language: nginx
+  category: hardcoded-key
+  severity: high
+  algorithm: TLS
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  file_globs: ["*.nginx.conf", "*.nginx", "nginx.conf", "conf.d/*.conf", "sites-available/*", "sites-enabled/*"]
+  detector:
+    type: regex
+    pattern: '^\s*ssl_certificate_key\s+(/tmp/|/var/tmp/|\./|\.\./)'
+  message: "nginx ssl_certificate_key points at an insecure path (world-writable / relative / temp directory)."
+  recommendation: "Store TLS private keys under /etc/ssl/private/ (mode 0600, owned by the nginx user) or load via a secret manager."
+  cwe: [798, 922]
+  confidence: 0.85
+  examples:
+    match:
+      - 'ssl_certificate_key /tmp/server.key;'
+    no_match:
+      - 'ssl_certificate_key /etc/nginx/ssl/server.key;'

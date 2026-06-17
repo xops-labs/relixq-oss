@@ -1,0 +1,306 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+# generateKeyPair / generateKeyPairSync dispatch on the first string argument
+# so each finding carries the correct algorithm (the old single RSA rule fired
+# on every key type, mislabeling 'ec' keygen as RSA).
+- id: JS_NODE_CRYPTO_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bgenerateKeyPair(Sync)?\s*\(\s*[''"]rsa(-pss)?[''"]'
+  message: "Node crypto generateKeyPair(Sync) with 'rsa'/'rsa-pss' - RSA is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const { publicKey, privateKey } = crypto.generateKeyPairSync(''rsa'', { modulusLength: 2048 });'
+    no_match:
+      - 'crypto.generateKeyPairSync(''ec'', { namedCurve: ''P-256'' });'
+
+- id: JS_NODE_CRYPTO_EC
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bgenerateKeyPair(Sync)?\s*\(\s*[''"]ec[''"]'
+  message: "Node crypto generateKeyPair(Sync) with 'ec' - elliptic-curve keys (ECDSA/ECDH) are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205); key establishment to ML-KEM (FIPS 203)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'crypto.generateKeyPairSync(''ec'', { namedCurve: ''P-256'' });'
+    no_match:
+      - 'crypto.generateKeyPairSync(''rsa'', { modulusLength: 2048 });'
+
+- id: JS_NODE_CRYPTO_ED25519
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bgenerateKeyPair(Sync)?\s*\(\s*[''"]ed(25519|448)[''"]'
+  message: "Node crypto generateKeyPair(Sync) with 'ed25519'/'ed448' - EdDSA is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const { publicKey, privateKey } = crypto.generateKeyPairSync(''ed25519'');'
+    no_match:
+      - 'crypto.generateKeyPairSync(''x25519'');'
+
+- id: JS_NODE_CRYPTO_DH
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bgenerateKeyPair(Sync)?\s*\(\s*[''"]dh[''"]'
+  message: "Node crypto generateKeyPair(Sync) with 'dh' - finite-field Diffie-Hellman is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'crypto.generateKeyPair(''dh'', { primeLength: 2048 }, callback);'
+    no_match:
+      - 'crypto.generateKeyPairSync(''dsa'', { modulusLength: 2048 });'
+
+- id: JS_NODE_CRYPTO_X25519
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bgenerateKeyPair(Sync)?\s*\(\s*[''"]x(25519|448)[''"]'
+  message: "Node crypto generateKeyPair(Sync) with 'x25519'/'x448' - classical Montgomery-curve key agreement is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'crypto.generateKeyPairSync(''x25519'');'
+    no_match:
+      - 'crypto.generateKeyPairSync(''ed25519'');'
+
+- id: JS_NODE_CREATE_ECDH
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bcreateECDH\s*\('
+  message: "Node crypto.createECDH - elliptic-curve Diffie-Hellman key agreement is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const ecdh = crypto.createECDH(''prime256v1'');'
+    no_match:
+      - 'const dh = crypto.createDiffieHellman(2048);'
+
+- id: JS_NODE_CREATE_SIGN_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bcreateSign\s*\(\s*[''"](RSA|rsa)-'
+  message: "Node crypto.createSign with an RSA digest identifier - RSA signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const signer = crypto.createSign(''RSA-SHA256'');'
+    no_match:
+      - 'const signer = crypto.createSign(''SHA256'');'
+
+- id: JS_NODE_CRYPTO_SIGN_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'crypto\.sign\s*\(\s*[''"]\w*(RSA|rsa)'
+  message: "Node crypto.sign with an RSA algorithm identifier - RSA signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'const signature = crypto.sign(''rsa-sha256'', data, privateKey);'
+    no_match:
+      - 'const signature = crypto.sign(''sha256'', data, privateKey);'
+
+# JWT algorithm identifiers (jsonwebtoken / jose / fast-jwt option objects).
+- id: JS_JWT_ALG_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'algorithm\s*:\s*[''"](RS|PS)(256|384|512)[''"]'
+  message: "JWT signing algorithm RS*/PS* - RSA-based JWT signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate JWT signing to ML-DSA (FIPS 204) as library support lands; inventory and plan key rotation now."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const token = jwt.sign(payload, privateKey, { algorithm: ''RS256'' });'
+    no_match:
+      - 'const token = jwt.sign(payload, secret, { algorithm: ''HS256'' });'
+
+- id: JS_JWT_ALG_ECDSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'algorithm\s*:\s*[''"]ES(256|384|512)K?[''"]'
+  message: "JWT signing algorithm ES* - ECDSA-based JWT signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate JWT signing to ML-DSA (FIPS 204) as library support lands; inventory and plan key rotation now."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const token = jwt.sign(payload, privateKey, { algorithm: ''ES256'' });'
+    no_match:
+      - 'const token = jwt.sign(payload, privateKey, { algorithm: ''EdDSA'' });'
+
+- id: JS_JWT_VERIFY_ALLOWLIST_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'algorithms\s*:\s*\[[^\]]*[''"](RS|PS)(256|384|512)[''"]'
+  message: "JWT verify allowlist accepts RS*/PS* - RSA-based JWT signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate JWT signing to ML-DSA (FIPS 204) as library support lands; inventory and plan key rotation now."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'jwt.verify(token, publicKey, { algorithms: [''RS256'', ''PS256''] });'
+    no_match:
+      - 'jwt.verify(token, secret, { algorithms: [''HS256''] });'
+
+- id: JS_JWT_VERIFY_ALLOWLIST_ECDSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'algorithms\s*:\s*\[[^\]]*[''"]ES(256|384|512)K?[''"]'
+  message: "JWT verify allowlist accepts ES* - ECDSA-based JWT signatures are quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate JWT signing to ML-DSA (FIPS 204) as library support lands; inventory and plan key rotation now."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'jwt.verify(token, publicKey, { algorithms: [''ES256''] });'
+    no_match:
+      - 'jwt.verify(token, secret, { algorithms: [''HS384''] });'
+
+- id: JS_NODE_RSA_PACKAGE
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bnew\\s+NodeRSA\\b"
+  message: "node-rsa package instantiated. RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'const key = new NodeRSA({ b: 2048 });'
+    no_match:
+      - 'const NodeRSA = require(''node-rsa'');'
+
+- id: JS_IMPORT_NODE_RSA
+  language: javascript
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "['\\\"]node\\-rsa['\\\"]"
+  message: "node-rsa package imported. Any RSA usage will be quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'const NodeRSA = require(''node-rsa'');'
+    no_match:
+      - 'const forge = require(''node-forge'');'

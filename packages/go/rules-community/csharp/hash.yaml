@@ -1,0 +1,43 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+- id: CSHARP_SHA1
+  language: csharp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(SHA1\.Create|SHA1Managed|HashAlgorithmName\.SHA1)\b'
+  message: "SHA-1 is cryptographically broken (collisions practical since 2017)."
+  recommendation: "Replace SHA-1 with SHA-256 or SHA-3 unless used for non-security purposes."
+  references:
+    - "https://shattered.io/"
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'using var sha1 = SHA1.Create();'
+    no_match:
+      - 'using var sha = SHA256.Create();'
+- id: CSHARP_MD5
+  language: csharp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(MD5\.Create|new\s+MD5CryptoServiceProvider|HashAlgorithmName\.MD5)\b'
+  message: "MD5 is cryptographically broken and must not be used for security-sensitive hashing."
+  recommendation: "Replace MD5 with SHA-256 or SHA-3."
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'using var md5 = MD5.Create();'
+    no_match:
+      - 'using var sha = SHA256.Create();'

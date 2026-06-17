@@ -1,0 +1,222 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Docker Compose crypto rules
+#
+# docker-compose.yaml / compose.yaml is the *service-composition*
+# surface where Dockerfile decisions get composed into actual runtime
+# services. Compose-level crypto choices include: which base image
+# tags get pulled (mirror of Dockerfile FROM rules), what TLS-related
+# environment variables get injected into containers, where secret
+# files come from on the host, and what command overrides each
+# service runs at startup (which can introduce build-time `openssl
+# genrsa` style calls at runtime, defeating any Dockerfile-level
+# hardening).
+#
+# Strategy: regex-only via `language: yaml` + `file_globs` restricted
+# to the Compose file naming conventions. The YAML route is shared
+# with the existing K8s `IAC_K8S_DEPRECATED_TLS_CIPHER` rule; no rule
+# IDs collide and the cipher-suite patterns in that rule don't
+# false-fire on Compose.
+#
+# Coverage map:
+#   - Base-image EOL:   image: alpine:3.1[0-4] etc (mirror Dockerfile)
+#   - Env TLS config:   TLS_VERSION=1.0/1.1, OPENSSL_CIPHERS=*RC4*
+#   - Secrets:          secrets: file: ./private.key (heuristic)
+#   - Command override: openssl genrsa / ssh-keygen weak invocations
+#   - Build args:       crypto-config args that disable TLS verify
+#                       or pin weak ciphers
+#
+# All rule IDs prefixed COMPOSE_.
+
+# ---------------------------------------------------------------------------
+# image: alpine:3.10 .. 3.14 — EOL base
+# ---------------------------------------------------------------------------
+- id: COMPOSE_BASE_EOL_ALPINE
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)^\s*image:\s*[''"]?\S*alpine:3\.(1[0-4])(\b|[^0-9])'
+  message: "Compose file pulls an EOL Alpine image (3.10-3.14) — unpatched OpenSSL / LibreSSL."
+  recommendation: "Bump to alpine:3.19+ and pin a digest. Match the Dockerfile FROM line if there's a paired Dockerfile."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# image: debian:jessie / stretch / centos:6 / centos:7 — EOL bases
+# ---------------------------------------------------------------------------
+- id: COMPOSE_BASE_EOL_DISTRO
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)^\s*image:\s*[''"]?\S*(debian:(jessie|stretch)|centos:[67])(\b|[^a-z0-9])'
+  message: "Compose file pulls an EOL distro image (debian jessie/stretch or centos 6/7) — unpatched OpenSSL 1.0.x."
+  recommendation: "Migrate to debian:bookworm, rockylinux:9, or alma linux:9 (OpenSSL 3.x)."
+  cwe: [1104]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# environment: TLS_VERSION=1.0 / 1.1
+# ---------------------------------------------------------------------------
+# Compose `environment:` lists can be either map (`KEY: value`) or list
+# (`- KEY=value`). Regex matches both shapes on the value bearing line.
+- id: COMPOSE_ENV_TLS_OLD_VERSION
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)\bTLS_(MIN_)?VERSION\b\s*[:=]\s*[''"]?(1\.0|1\.1|TLSv1\.0|TLSv1\.1)\b'
+  message: "Compose environment pins TLS 1.0 / 1.1 for a service."
+  recommendation: "Set TLS_VERSION (or service-specific equivalent) to 1.2 minimum; 1.3 preferred."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# environment: OPENSSL_CIPHERS containing RC4 / 3DES / NULL / EXPORT
+# ---------------------------------------------------------------------------
+- id: COMPOSE_ENV_OPENSSL_WEAK_CIPHER
+  language: yaml
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: tls_config
+  quantum_safety: classically_broken
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)\bOPENSSL_(CIPHERS|CONF)\b\s*[:=]\s*[''"]?[^''"\n]*(RC4|3DES|DES-CBC|NULL|EXPORT|aNULL|eNULL)\b'
+  message: "Compose environment pins an OPENSSL_CIPHERS value containing a weak / broken cipher (RC4, 3DES, NULL, EXPORT)."
+  recommendation: "Remove OPENSSL_CIPHERS override or set it to `HIGH:!aNULL:!eNULL:!RC4:!3DES`. Prefer TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# secrets: file: ./private.key — host private-key material
+# ---------------------------------------------------------------------------
+# Heuristic: top-level `secrets:` map or service-level `secrets:` ref
+# pointing at a file whose name looks like a private key. The compose
+# secrets feature is the *right* way to inject keys, but a literal
+# `private.key` / `id_rsa` / `.pem` filename in the repo strongly
+# suggests the key itself is checked in.
+- id: COMPOSE_SECRETS_PRIVATE_KEY_FILE
+  language: yaml
+  category: secret-exposure
+  severity: critical
+  algorithm: RSA
+  usage_type: secret
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)^\s*file:\s*[''"]?\.?/?[\w./-]*(private\.key|id_rsa|id_dsa|id_ecdsa|\.pem|\.p12|\.pfx)\b'
+  message: "Compose secrets / volumes mount what looks like an in-repo private-key file (private.key / id_rsa / .pem / .p12)."
+  recommendation: "Move the key out of the repo into a secret manager (Docker Swarm secrets, K8s secrets, Vault) and reference by name. Rotate the leaked key."
+  cwe: [798]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# command: containing openssl genrsa or ssh-keygen weak-bit / DSA
+# ---------------------------------------------------------------------------
+- id: COMPOSE_COMMAND_WEAK_KEYGEN
+  language: yaml
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)\b(openssl\s+genrsa\b(?:\s+-out\s+\S+)?\s+(1024|2048)\b|ssh-keygen\b[^\n]*?-t\s+(dsa|rsa\b[^\n]*?-b\s+1024)\b)'
+  message: "Compose command runs `openssl genrsa` with a weak bit-length, or `ssh-keygen` with DSA / 1024-bit RSA at container startup."
+  recommendation: "Generate keys out-of-band (CI / secret manager) instead of at container start; if you must, use 3072-bit minimum or ed25519. Plan ML-DSA migration."
+  cwe: [326]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# build args containing crypto-downgrade flags
+# ---------------------------------------------------------------------------
+# Compose `build.args` map can pass crypto-config through to the Dockerfile
+# (e.g. `TLS_VERSION: "1.0"`, `INSECURE_TLS: "1"`, `DISABLE_TLS_VERIFY: "true"`).
+- id: COMPOSE_BUILD_ARGS_INSECURE_TLS
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs:
+    - "docker-compose.yaml"
+    - "docker-compose.yml"
+    - "docker-compose.*.yaml"
+    - "docker-compose.*.yml"
+    - "compose.yaml"
+    - "compose.yml"
+    - "compose.*.yaml"
+    - "compose.*.yml"
+  detector:
+    type: regex
+    pattern: '(?i)\b(INSECURE_TLS|DISABLE_TLS_VERIFY|SKIP_TLS_VERIFY|NO_TLS_VERIFY)\b\s*[:=]\s*[''"]?(1|true|yes|on)\b'
+  message: "Compose build args pass a TLS-verification-disable flag through to the image build (INSECURE_TLS / DISABLE_TLS_VERIFY / SKIP_TLS_VERIFY)."
+  recommendation: "Remove the build arg and let the build use TLS verification by default. If a private CA is needed, mount the CA bundle (`--mount=type=secret`)."
+  cwe: [295]
+  confidence: 0.9

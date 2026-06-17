@@ -1,0 +1,440 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Terraform / HCL crypto rules
+#
+# Terraform is where production cryptographic choices LIVE: KMS key
+# specs, ACM certificate algorithms, ALB/CloudFront/API Gateway TLS
+# policies, RDS at-rest encryption, Azure Key Vault key types, GCP KMS
+# CryptoKey algorithms. A `terraform apply` is the moment a service
+# commits to RSA-2048 vs ECC vs (future) ML-KEM/ML-DSA. The static-code
+# scanner's existing `IAC_TERRAFORM_TLS_OLD_VERSION` rule covered only
+# one slice (deprecated min TLS strings); this pack adds the rest of the
+# production-crypto signal across AWS, Azure, and GCP.
+#
+# Strategy: regex-only. The hashicorp/hcl/v2 parser is the "right" tool
+# for full HCL2 AST but pulling it into go.mod conflicts with the
+# lean-dependency goal here. Regex matches per-line, so
+# patterns target the canonical single-line attribute form found in
+# >95% of real Terraform (`key_spec = "RSA_2048"` etc). The existing
+# IAC_TERRAFORM_TLS_OLD_VERSION rule (in rules/config/iac.yaml) remains;
+# this pack is purely additive.
+#
+# Coverage map:
+#   - AWS:    KMS / ACM / ALB+NLB / CloudFront / API Gateway / RDS /
+#             S3 / IAM / OpenSearch
+#   - Azure:  Key Vault / Storage Account / Front Door / App Gateway
+#   - GCP:    KMS CryptoKey / load balancer SSL policy
+#   - Generic: hardcoded private keys, weak cipher lists, tls_private_key
+#
+# All RSA / ECC-NIST / DH key material is classified `quantum_safety:
+# vulnerable` regardless of bit-length — Shor's algorithm breaks the
+# underlying assumption, not the size. NIST FIPS 203/204/205 (ML-KEM,
+# ML-DSA, SLH-DSA) are the recommended migration targets; AWS KMS,
+# Azure Key Vault, and GCP KMS do not yet expose those as first-class
+# key specs as of 2026, so recommendations point to hybrid stopgaps
+# (e.g. AWS KMS hybrid-MLKEM via the encryption-SDK) plus tracking
+# provider GA announcements.
+
+# ---------------------------------------------------------------------------
+# AWS — KMS (Key Management Service)
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_KMS_RSA_KEY
+  language: terraform
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: kms
+  quantum_safety: vulnerable
+  # aws_kms_key.key_spec = "RSA_2048" / "RSA_3072" / "RSA_4096" — any RSA
+  # spec is quantum-vulnerable; bit-length only buys classical headroom.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_spec\s*=\s*"RSA_(2048|3072|4096)"'
+  message: "aws_kms_key uses an RSA key spec — RSA is quantum-vulnerable regardless of bit-length."
+  recommendation: "Track AWS KMS hybrid PQC roadmap (ML-KEM via the AWS Encryption SDK is already available for envelope encryption). For now: prefer AWS-managed keys with envelope encryption and rotate; for app-controlled keys plan migration to ML-KEM-768 / ML-DSA-65 once KMS exposes them."
+  cwe: [327]
+  confidence: 0.95
+- id: TERRAFORM_AWS_KMS_ECC_KEY
+  language: terraform
+  category: weak-crypto
+  severity: high
+  algorithm: ECC
+  usage_type: kms
+  quantum_safety: vulnerable
+  # aws_kms_key.key_spec = "ECC_NIST_P256" / "P384" / "P521" / "ECC_SECG_P256K1"
+  # — all ECDLP-based; Shor breaks the discrete log just like RSA.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_spec\s*=\s*"ECC_(NIST_P(256|384|521)|SECG_P256K1)"'
+  message: "aws_kms_key uses an ECC key spec — elliptic curve signatures are quantum-vulnerable (Shor)."
+  recommendation: "Plan migration to ML-DSA-65 (FIPS 204) for signing or hybrid ECDSA+ML-DSA. Track AWS KMS PQC algorithm GA."
+  cwe: [327]
+  confidence: 0.95
+- id: TERRAFORM_AWS_KMS_CMK_RSA
+  language: terraform
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: kms
+  quantum_safety: vulnerable
+  # Legacy `customer_master_key_spec` attribute (replaced by key_spec but
+  # still widespread in older modules).
+  detector:
+    type: regex
+    pattern: '(?i)\bcustomer_master_key_spec\s*=\s*"RSA_(2048|3072|4096)"'
+  message: "aws_kms_key.customer_master_key_spec pins an RSA CMK — quantum-vulnerable."
+  recommendation: "Migrate to the modern `key_spec` attribute and plan PQC migration when AWS KMS exposes ML-KEM / ML-DSA specs."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# AWS — ACM (Certificate Manager)
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_ACM_RSA_1024
+  language: terraform
+  category: weak-crypto
+  severity: critical
+  algorithm: RSA
+  key_size: 1024
+  usage_type: certificate
+  quantum_safety: vulnerable
+  # aws_acm_certificate.key_algorithm = "RSA_1024" — broken classically;
+  # NIST sunset RSA-1024 in 2014. Critical even before quantum.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_algorithm\s*=\s*"RSA_1024"'
+  message: "aws_acm_certificate uses RSA-1024 — broken classically (factorable below 2010-era effort) and quantum-vulnerable."
+  recommendation: "Upgrade to RSA-2048 minimum today, plan migration to ML-DSA / hybrid certificates as ACM exposes PQC."
+  cwe: [326]
+  confidence: 0.98
+- id: TERRAFORM_AWS_ACM_RSA_2048
+  language: terraform
+  category: weak-crypto
+  severity: medium
+  algorithm: RSA
+  key_size: 2048
+  usage_type: certificate
+  quantum_safety: vulnerable
+  # RSA-2048 is the current safe-classical minimum but is quantum-vulnerable.
+  # Medium severity flags this as a PQC migration debt, not a today-critical.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_algorithm\s*=\s*"RSA_2048"'
+  message: "aws_acm_certificate uses RSA-2048 — safe classically but quantum-vulnerable; certificate is a PQC migration target."
+  recommendation: "Plan migration to hybrid (ECDSA+ML-DSA) or pure ML-DSA-65 certificates once ACM exposes PQC algorithms."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# AWS — ALB / NLB listener SSL policies (deprecated TLS)
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_ALB_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # aws_lb_listener.ssl_policy = "ELBSecurityPolicy-TLS-1-0-*" or
+  # "-TLS-1-1-*" pins a TLS 1.0/1.1 minimum on the load balancer.
+  detector:
+    type: regex
+    pattern: '(?i)\bssl_policy\s*=\s*"ELBSecurityPolicy-TLS-1-[01]-'
+  message: "aws_lb_listener pins a deprecated TLS 1.0/1.1 security policy."
+  recommendation: "Switch to ELBSecurityPolicy-TLS13-1-2-2021-06 (TLS 1.3) or at minimum ELBSecurityPolicy-TLS-1-2-Ext-2018-06."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS — CloudFront viewer / origin protocols
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_CLOUDFRONT_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # aws_cloudfront_distribution.viewer_certificate.minimum_protocol_version
+  # = "SSLv3" / "TLSv1" / "TLSv1_2016" — all deprecated by AWS.
+  detector:
+    type: regex
+    pattern: '(?i)\bminimum_protocol_version\s*=\s*"(SSLv3|TLSv1|TLSv1_2016)"'
+  message: "aws_cloudfront_distribution pins a deprecated minimum protocol version (SSLv3 / TLSv1 / TLSv1_2016)."
+  recommendation: "Set minimum_protocol_version to TLSv1.2_2021 or TLSv1.3_2022."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS — API Gateway domain TLS
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_APIGW_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # aws_api_gateway_domain_name.security_policy = "TLS_1_0" — API Gateway
+  # supports only TLS_1_0 / TLS_1_2 string values; TLS_1_0 is deprecated.
+  detector:
+    type: regex
+    pattern: '(?i)\bsecurity_policy\s*=\s*"TLS_1_0"'
+  message: "aws_api_gateway_domain_name pins TLS 1.0 — deprecated."
+  recommendation: "Set security_policy = \"TLS_1_2\"."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS — RDS / Aurora storage encryption
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_RDS_UNENCRYPTED
+  language: terraform
+  category: missing-encryption
+  severity: high
+  algorithm: AES
+  usage_type: at_rest_encryption
+  quantum_safety: vulnerable
+  # aws_db_instance / aws_rds_cluster.storage_encrypted = false explicitly
+  # disables at-rest encryption. Default is false on older provider versions
+  # so the explicit `false` is what we flag with high signal.
+  detector:
+    type: regex
+    pattern: '(?i)\bstorage_encrypted\s*=\s*false\b'
+  message: "RDS / Aurora storage_encrypted = false — at-rest encryption is disabled."
+  recommendation: "Set storage_encrypted = true and bind a customer-managed kms_key_id; plan migration toward post-quantum envelope encryption (AWS Encryption SDK with ML-KEM)."
+  cwe: [311]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS — S3 bucket SSE algorithm
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_S3_SSE_AES256_MANAGED
+  language: terraform
+  category: weak-crypto
+  severity: low
+  algorithm: AES
+  usage_type: at_rest_encryption
+  quantum_safety: hybrid
+  # aws_s3_bucket_server_side_encryption_configuration with
+  # sse_algorithm = "AES256" uses AWS-managed SSE-S3 keys; allowed but
+  # flagged so reviewers consider SSE-KMS with a customer-managed key.
+  detector:
+    type: regex
+    pattern: '(?i)\bsse_algorithm\s*=\s*"AES256"'
+  message: "S3 bucket uses SSE-S3 (AWS-managed AES-256). Acceptable but consider SSE-KMS with a CMK for audit + rotation."
+  recommendation: "Use sse_algorithm = \"aws:kms\" with kms_master_key_id pointing at a customer-managed KMS key. AES-256 itself is quantum-resistant; the gap is key management."
+  cwe: [326]
+  confidence: 0.7
+# ---------------------------------------------------------------------------
+# Azure — Key Vault key type / size
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AZURE_KEYVAULT_RSA_2048
+  language: terraform
+  category: weak-crypto
+  severity: medium
+  algorithm: RSA
+  key_size: 2048
+  usage_type: kms
+  quantum_safety: vulnerable
+  # azurerm_key_vault_key.key_size = 2048 — safe classically, quantum-
+  # vulnerable. Severity medium flags this as a PQC migration target.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_size\s*=\s*2048\b'
+  message: "azurerm_key_vault_key uses a 2048-bit RSA key — quantum-vulnerable."
+  recommendation: "Plan migration to PQC keys once Azure Key Vault exposes ML-KEM / ML-DSA (preview as of 2026). Interim: use hybrid encryption at the application layer."
+  cwe: [327]
+  confidence: 0.85
+- id: TERRAFORM_AZURE_KEYVAULT_RSA_1024
+  language: terraform
+  category: weak-crypto
+  severity: critical
+  algorithm: RSA
+  key_size: 1024
+  usage_type: kms
+  quantum_safety: vulnerable
+  # azurerm_key_vault_key.key_size = 1024 — broken classically.
+  detector:
+    type: regex
+    pattern: '(?i)\bkey_size\s*=\s*1024\b'
+  message: "azurerm_key_vault_key uses a 1024-bit RSA key — broken classically and quantum-vulnerable."
+  recommendation: "Rotate to RSA-3072 minimum immediately; plan PQC migration."
+  cwe: [326]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# Azure — Storage Account / Front Door / App Gateway minimum TLS
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AZURE_STORAGE_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # azurerm_storage_account.min_tls_version = "TLS1_0" / "TLS1_1" —
+  # deprecated by Azure (TLS1_2 is the current default).
+  detector:
+    type: regex
+    pattern: '(?i)\bmin_tls_version\s*=\s*"TLS1_[01]"'
+  message: "azurerm_storage_account pins TLS 1.0 / 1.1 as minimum."
+  recommendation: "Set min_tls_version = \"TLS1_2\"."
+  cwe: [327]
+  confidence: 0.95
+- id: TERRAFORM_AZURE_FRONTDOOR_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # azurerm_frontdoor / azurerm_application_gateway minimum_tls_version
+  # = "TLSv1_0" / "TLSv1_1" — deprecated.
+  detector:
+    type: regex
+    pattern: '(?i)\bminimum_tls_version\s*=\s*"TLSv1_[01]"'
+  message: "Azure Front Door / Application Gateway pins TLS 1.0 / 1.1."
+  recommendation: "Set minimum_tls_version = \"TLSv1_2\" (TLSv1_3 once supported by the resource)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# GCP — KMS CryptoKey algorithm
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_GCP_KMS_PKCS1
+  language: terraform
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  # google_kms_crypto_key_version.algorithm = "RSA_SIGN_PKCS1_*" — PKCS#1
+  # v1.5 padding is deprecated for new code (PSS preferred), and RSA itself
+  # is quantum-vulnerable.
+  detector:
+    type: regex
+    pattern: '(?i)\balgorithm\s*=\s*"RSA_SIGN_PKCS1_'
+  message: "google_kms_crypto_key uses RSA-PKCS#1 v1.5 signing — deprecated padding and quantum-vulnerable algorithm."
+  recommendation: "Switch to RSA_SIGN_PSS_* as an interim; plan migration to ML-DSA when Cloud KMS exposes it."
+  cwe: [327]
+  confidence: 0.95
+- id: TERRAFORM_GCP_KMS_OAEP_SHA1
+  language: terraform
+  category: weak-hash
+  severity: high
+  algorithm: RSA-OAEP-SHA1
+  usage_type: encryption
+  quantum_safety: vulnerable
+  # google_kms_crypto_key_version.algorithm = "RSA_DECRYPT_OAEP_*_SHA1"
+  # — SHA-1 is collision-broken; OAEP needs SHA-256 minimum.
+  detector:
+    type: regex
+    pattern: '(?i)\balgorithm\s*=\s*"RSA_DECRYPT_OAEP_\d+_SHA1"'
+  message: "google_kms_crypto_key uses RSA-OAEP with SHA-1 — SHA-1 is collision-broken."
+  recommendation: "Switch to RSA_DECRYPT_OAEP_*_SHA256 immediately; plan ML-KEM migration."
+  cwe: [327]
+  confidence: 0.98
+- id: TERRAFORM_GCP_LB_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # google_compute_ssl_policy.min_tls_version = "TLS_1_0" / "TLS_1_1".
+  detector:
+    type: regex
+    pattern: '(?i)\bmin_tls_version\s*=\s*"TLS_1_[01]"'
+  message: "google_compute_ssl_policy pins TLS 1.0 / 1.1."
+  recommendation: "Set min_tls_version = \"TLS_1_2\"."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Generic — weak cipher / algorithm lists across providers
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_WEAK_CIPHER_DES
+  language: terraform
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Any list referencing DES / 3DES — broken classically (Sweet32).
+  # Word-boundary anchors so the match works inside both bare quoted
+  # tokens ("3DES") and longer cipher-suite names
+  # ("TLS_RSA_WITH_3DES_EDE_CBC_SHA").
+  detector:
+    type: regex
+    pattern: '(?i)\b3?DES(_EDE)?(_CBC)?\b'
+  message: "Terraform configuration references DES / 3DES — broken classically (Sweet32 birthday attack)."
+  recommendation: "Remove DES / 3DES from allowed cipher / algorithm lists; require AES-GCM minimum."
+  cwe: [327]
+  confidence: 0.95
+- id: TERRAFORM_WEAK_CIPHER_RC4
+  language: terraform
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # RC4 cipher reference anywhere in a quoted string — covers both bare
+  # "RC4" and longer cipher-suite names like "TLS_RSA_WITH_RC4_128_SHA".
+  detector:
+    type: regex
+    pattern: '(?i)\bRC4(_128)?\b'
+  message: "Terraform configuration references RC4 — broken (biases recoverable in real time)."
+  recommendation: "Remove RC4 from allowed ciphers; require TLS 1.2+ AEAD ciphers (AES-GCM, ChaCha20-Poly1305)."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Generic — hardcoded private keys in HCL
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_HARDCODED_PRIVATE_KEY
+  language: terraform
+  category: secret-exposure
+  severity: critical
+  algorithm: RSA
+  usage_type: secret
+  quantum_safety: vulnerable
+  # Any line containing the PEM header for a private key inside an HCL
+  # string. Regex matches on a single line — the BEGIN marker is the
+  # high-signal anchor.
+  detector:
+    type: regex
+    pattern: '-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED |)PRIVATE KEY-----'
+  message: "Terraform file embeds a PEM private key inline — secret exposure."
+  recommendation: "Move the key to a secret manager (AWS Secrets Manager / Azure Key Vault / GCP Secret Manager) and reference it via a data source. Rotate the leaked key."
+  cwe: [798]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# TLS provider — tls_private_key resource with weak RSA
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_TLS_PROVIDER_RSA_WEAK
+  language: terraform
+  category: weak-crypto
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  # tls_private_key resource — rsa_bits = 1024 / 2048. Anything below
+  # 3072 is high-severity; the bits-value pattern catches both.
+  detector:
+    type: regex
+    pattern: '(?i)\brsa_bits\s*=\s*(1024|2048)\b'
+  message: "tls_private_key resource generates a weak RSA key (rsa_bits ≤ 2048)."
+  recommendation: "Set rsa_bits = 3072 minimum; plan ML-DSA migration when the tls provider exposes PQC algorithms."
+  cwe: [326]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# AWS — OpenSearch / Elasticsearch domain TLS policy
+# ---------------------------------------------------------------------------
+- id: TERRAFORM_AWS_OPENSEARCH_TLS_OLD
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # aws_opensearch_domain / aws_elasticsearch_domain.tls_security_policy
+  # = "Policy-Min-TLS-1-0-2019-07" — deprecated.
+  detector:
+    type: regex
+    pattern: '(?i)\btls_security_policy\s*=\s*"Policy-Min-TLS-1-0-'
+  message: "aws_opensearch_domain / aws_elasticsearch_domain pins TLS 1.0."
+  recommendation: "Set tls_security_policy = \"Policy-Min-TLS-1-2-2019-07\" (or the 1.2-PFS-2023-10 variant)."
+  cwe: [327]
+  confidence: 0.95

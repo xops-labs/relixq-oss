@@ -1,0 +1,110 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: RUST_RSA_CRATE_NEW
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa::RsaPrivateKey::new\\s*\\("
+  message: "rsa::RsaPrivateKey::new(...) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUST_RSA_CRATE_NEW_WITH_EXP
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa::RsaPrivateKey::new_with_exp\\s*\\("
+  message: "rsa::RsaPrivateKey::new_with_exp(...) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUST_RING_RSA_KEYPAIR
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bRsaKeyPair::from_pkcs8\\s*\\("
+  message: "RsaKeyPair::from_pkcs8 (ring) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUST_RING_ECDSA
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bEcdsaKeyPair::generate_pkcs8\\s*\\("
+  message: "EcdsaKeyPair::generate_pkcs8 (ring::signature) — classical ECDSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUST_USE_RSA_CRATE
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\buse\\s+rsa::"
+  message: "use rsa::… — the `rsa` crate exposes quantum-vulnerable primitives."
+  cwe: [327]
+
+- id: RUST_OPENSSL_RSA_GENERATE
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bopenssl::rsa::Rsa::generate\\s*\\("
+  message: "openssl::rsa::Rsa::generate(...) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: RUST_RSA_KEY_SIZE_1024
+  language: rust
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: "RsaPrivateKey::new(?:_with_exp)?\\s*\\([^)]*,\\s*1024\\b"
+  message: "RsaPrivateKey::new(... 1024 ...) — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  cwe: [326, 327]
+  confidence: 0.9

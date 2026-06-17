@@ -1,0 +1,63 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+- id: CONFIG_TLS_OLD_VERSION
+  language: any
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml", "*.json", "*.conf", "*.ini", "*.toml"]
+  detector:
+    type: regex
+    pattern: '\b(SSLv?3|TLSv?1\.0|TLSv?1\.1|tls1_0|tls1_1)\b'
+    flags: i
+  message: "Configuration references a deprecated TLS protocol."
+  recommendation: "Pin the configuration to TLS 1.2 minimum and prefer TLS 1.3."
+  cwe: [327]
+  confidence: 0.7
+  examples:
+    match:
+      - 'min_tls_version = TLSv1.0'
+    no_match:
+      - 'min_tls_version = TLSv1.2'
+- id: CONFIG_HARDCODED_RSA_PRIVATE_KEY
+  language: any
+  category: hardcoded-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----'
+  message: "PEM-encoded private key embedded in source/config."
+  recommendation: "Move private keys to a secret manager / Key Vault. Never commit them to source control."
+  cwe: [798]
+  confidence: 0.99
+  examples:
+    match:
+      - '-----BEGIN RSA PRIVATE KEY-----'
+    no_match:
+      - '-----BEGIN PUBLIC KEY-----'
+- id: CONFIG_INSECURE_CIPHER_RC4
+  language: any
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bRC4(-MD5|-SHA)?\b'
+    flags: i
+  message: "RC4 cipher referenced in configuration."
+  recommendation: "Remove RC4. Use AES-GCM or ChaCha20-Poly1305 cipher suites."
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'ciphers = RC4-SHA:HIGH'
+    no_match:
+      - 'ciphers = AES128-GCM-SHA256'

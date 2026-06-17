@@ -1,0 +1,299 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Dart / Flutter crypto rules
+#
+# Dart powers Flutter and a growing mobile / cross-platform fleet. The
+# practical cryptographic surface area observed in production Dart code is:
+#   - `package:crypto` — Google's reference hash + HMAC package. Exposes
+#     `md5`, `sha1`, `sha256`, `sha512` as top-level `Hash` instances with a
+#     uniform `.convert(bytes)` API plus an `Hmac(hash, key)` wrapper.
+#   - `package:pointycastle` — pure-Dart port of Bouncy Castle. Covers RSA,
+#     ECDSA, AES, the older DES/3DES/RC4 ciphers, MD5/SHA1 digests, and a
+#     suite of block-cipher modes including ECB. Most legacy-crypto risk in
+#     Flutter apps surfaces through this package.
+#   - `package:cryptography` — modern Dart crypto by Gohilla (Chacha20,
+#     X25519, Ed25519, AES-GCM, PBKDF2/Argon2). Healthy choice on the whole
+#     but still pre-PQC and worth inventorying.
+#   - `dart:io` — TLS via `HttpClient` / `SecurityContext`. The
+#     `badCertificateCallback` setter is the canonical "accept any cert"
+#     footgun and `setTrustedCertificatesBytes` deserves an informational
+#     flag for trust-anchor audit.
+# All of the public-key primitives reachable here (RSA, ECDSA, X25519,
+# Ed25519) are quantum-vulnerable; MD5/SHA1/DES/RC4/ECB are classically
+# broken. PointyCastle does not yet ship Kyber / Dilithium / Falcon, so
+# migration recommendations point at hybrid TLS at the platform channel
+# layer plus eventual `package:cryptography` upgrades when Gohilla ships
+# PQ algorithms.
+#
+# Strategy: regex-only. There is no `github.com/smacker/go-tree-sitter/dart`
+# binding in the smacker module pinned by go.mod, and vendoring
+# `UserNobody14/tree-sitter-dart` behind a custom CGO wrapper is out of
+# scope for the initial Tier 2.6 ship.
+# Falling back to regex-only is acceptable for cross-platform mobile.
+# Dart syntax is regular enough that boundary-anchored regex catches the
+# practical patterns without unacceptable false-positive rates.
+
+# ---------------------------------------------------------------------------
+# Package imports (informational signals)
+# ---------------------------------------------------------------------------
+- id: DART_MD5_CONVERT
+  language: dart
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `md5.convert(bytes)` — the canonical package:crypto MD5 entry point.
+  # The top-level `md5` is a `Hash` instance, so the call surface is always
+  # `md5.convert(...)`. MD5 is collision-broken (well before quantum).
+  detector:
+    type: regex
+    pattern: '\bmd5\.convert\s*\('
+  message: "md5.convert(...) — MD5 hashing via package:crypto; collision-broken."
+  recommendation: "Replace with sha256.convert(...) for new code. For long-term inventory, plan SHA3-256 / SHAKE256 migration as the PointyCastle ecosystem catches up."
+  cwe: [327, 328]
+  confidence: 0.92
+- id: DART_SHA1_CONVERT
+  language: dart
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `sha1.convert(bytes)` — same shape as md5.convert; SHA-1 is collision-
+  # broken (SHAttered, 2017) and unfit for any signature / integrity use.
+  detector:
+    type: regex
+    pattern: '\bsha1\.convert\s*\('
+  message: "sha1.convert(...) — SHA-1 hashing via package:crypto; collision-broken (SHAttered)."
+  recommendation: "Replace with sha256.convert(...) immediately. Plan SHA3 / SHAKE migration for long-term storage."
+  cwe: [327, 328]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# Broken hashes — package:pointycastle digest instances
+# ---------------------------------------------------------------------------
+- id: DART_POINTYCASTLE_MD5_DIGEST
+  language: dart
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # PointyCastle exposes `MD5Digest()` (current API) and a historic `MD5()`
+  # constructor. Either constructs an MD5 hasher. Anchored on word boundary
+  # to avoid matching identifiers like `myMD5Helper`.
+  detector:
+    type: regex
+    pattern: '\b(?:MD5Digest|MD5)\s*\(\s*\)'
+  message: "PointyCastle MD5 / MD5Digest() — MD5 hasher constructor; collision-broken."
+  recommendation: "Replace with SHA256Digest() or move hashing to package:cryptography Sha256()."
+  cwe: [327, 328]
+  confidence: 0.9
+- id: DART_POINTYCASTLE_SHA1_DIGEST
+  language: dart
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # PointyCastle `SHA1Digest()` constructor. Anchored on word boundary so
+  # `SHA1Digest` is not confused with `SHA1DigestSink` etc.
+  detector:
+    type: regex
+    pattern: '\bSHA1Digest\s*\(\s*\)'
+  message: "PointyCastle SHA1Digest() — SHA-1 hasher constructor; collision-broken."
+  recommendation: "Replace with SHA256Digest()."
+  cwe: [327, 328]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Weak HMAC compositions
+# ---------------------------------------------------------------------------
+- id: DART_HMAC_MD5
+  language: dart
+  category: weak-mac
+  severity: high
+  algorithm: HMAC-MD5
+  usage_type: mac
+  quantum_safety: classically_broken
+  # `Hmac(md5, key)` — package:crypto's HMAC wrapper over the top-level
+  # `md5` Hash instance. HMAC-MD5 has known practical attacks and is
+  # disallowed by most modern standards.
+  detector:
+    type: regex
+    pattern: '\bHmac\s*\(\s*md5\s*,'
+  message: "Hmac(md5, ...) — HMAC-MD5; deprecated and disallowed by modern standards."
+  recommendation: "Replace with Hmac(sha256, ...) or move to package:cryptography Hmac.sha256()."
+  cwe: [327, 328]
+  confidence: 0.92
+- id: DART_HMAC_SHA1
+  language: dart
+  category: weak-mac
+  severity: high
+  algorithm: HMAC-SHA1
+  usage_type: mac
+  quantum_safety: classically_broken
+  # `Hmac(sha1, key)` — HMAC-SHA1 is deprecated for new use; still seen in
+  # legacy AWS-SigV2 and OAuth1 code paths.
+  detector:
+    type: regex
+    pattern: '\bHmac\s*\(\s*sha1\s*,'
+  message: "Hmac(sha1, ...) — HMAC-SHA1; deprecated for new use."
+  recommendation: "Replace with Hmac(sha256, ...). Audit any AWS-SigV2 / OAuth1 paths that may still require SHA-1 interop."
+  cwe: [327, 328]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# RSA key sizing
+# ---------------------------------------------------------------------------
+- id: DART_RSA_KEYSIZE_1024
+  language: dart
+  category: weak-key
+  severity: critical
+  algorithm: RSA-1024
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # PointyCastle's `RSAKeyGeneratorParameters(publicExponent, bitStrength,
+  # certainty)` — flag any literal `1024` bit-strength. The `BigInt.\w+`
+  # term covers `BigInt.from(65537)` / `BigInt.parse(...)`; the `\b1024\b`
+  # match is anchored so `10240` etc. do not trip.
+  detector:
+    type: regex
+    pattern: 'RSAKeyGeneratorParameters\s*\(\s*BigInt\.\w+\([^)]*\)\s*,\s*1024\b'
+  message: "RSAKeyGeneratorParameters(..., 1024, ...) — RSA-1024 key generation; classically weak and quantum-broken."
+  recommendation: "Use 2048+ for transitional deployments. Plan hybrid PQ (e.g. Kyber + X25519 at the TLS layer) and inventory all RSA call sites for eventual ML-KEM / ML-DSA migration."
+  cwe: [326, 327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Broken symmetric ciphers — PointyCastle engines
+# ---------------------------------------------------------------------------
+- id: DART_POINTYCASTLE_DES
+  language: dart
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # `DESEngine()` / `DESedeEngine()` — single-DES and 3DES PointyCastle
+  # block-cipher engines. DES is brute-forceable; 3DES is deprecated.
+  detector:
+    type: regex
+    pattern: '\b(?:DESEngine|DESedeEngine)\s*\(\s*\)'
+  message: "PointyCastle DESEngine() / DESedeEngine() — DES or 3DES block cipher; broken / deprecated."
+  recommendation: "Replace with AESEngine() under GCM (GCMBlockCipher) or move to package:cryptography AesGcm()."
+  cwe: [327]
+  confidence: 0.95
+- id: DART_POINTYCASTLE_RC4
+  language: dart
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # `RC4Engine()` — RC4 stream cipher; biased keystream, broken for
+  # essentially all uses.
+  detector:
+    type: regex
+    pattern: '\bRC4Engine\s*\(\s*\)'
+  message: "PointyCastle RC4Engine() — RC4 stream cipher; biased keystream, considered broken."
+  recommendation: "Replace with ChaCha20-Poly1305 (package:cryptography Chacha20.poly1305Aead()) or AES-GCM."
+  cwe: [327]
+  confidence: 0.95
+- id: DART_BLOCKCIPHER_STRING_DES_RC4
+  language: dart
+  category: weak-cipher
+  severity: high
+  algorithm: DES_or_RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # PointyCastle also resolves engines by string name via the registry:
+  # `BlockCipher('DES')`, `BlockCipher('DES/ECB')`, `BlockCipher('RC4')`.
+  # Catch the string forms separately because the AST shape is different.
+  detector:
+    type: regex
+    pattern: 'BlockCipher\s*\(\s*[''"](?:DES|DES/ECB|RC4)[''"]'
+  message: "BlockCipher('DES' | 'DES/ECB' | 'RC4') — registry lookup of a broken cipher."
+  recommendation: "Use BlockCipher('AES') with an AEAD mode (GCM, CCM) or move to package:cryptography."
+  cwe: [327]
+  confidence: 0.9
+- id: DART_POINTYCASTLE_ECB_MODE
+  language: dart
+  category: weak-cipher
+  severity: high
+  algorithm: ECB
+  usage_type: encryption_mode
+  quantum_safety: vulnerable
+  # `ECBBlockCipher(...)` — ECB-mode wrapper, deterministic for equal
+  # blocks; leaks plaintext structure (the famous Tux example).
+  detector:
+    type: regex
+    pattern: '\bECBBlockCipher\s*\('
+  message: "ECBBlockCipher(...) — ECB mode; deterministic, leaks plaintext structure."
+  recommendation: "Use GCMBlockCipher / CCMBlockCipher (AEAD) instead of ECB or raw CBC."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# TLS / certificate handling — dart:io
+# ---------------------------------------------------------------------------
+- id: DART_TLS_BAD_CERT_CALLBACK
+  language: dart
+  category: tls
+  severity: critical
+  algorithm: TLS
+  usage_type: tls_validation
+  quantum_safety: vulnerable
+  # `HttpClient().badCertificateCallback = ...` — Dart's escape hatch for
+  # accepting bad TLS certs. The presence of this setter at all is a strong
+  # smell; a return-true callback is an outright break. We catch both the
+  # `HttpClient()` chained form and standalone `client.badCertificateCallback =`
+  # by matching the property assignment.
+  detector:
+    type: regex
+    pattern: '\.badCertificateCallback\s*='
+  message: "badCertificateCallback setter — disables / overrides TLS certificate validation; classic MITM exposure."
+  recommendation: "Remove the callback. Use proper certificate pinning (e.g. package:http_certificate_pinning) and ensure the SecurityContext loads only trusted CAs."
+  cwe: [295]
+  confidence: 0.85
+- id: DART_TLS_TRUSTED_CERT_BYTES
+  language: dart
+  category: tls
+  severity: info
+  algorithm: TLS
+  usage_type: trust_anchor
+  quantum_safety: vulnerable
+  # `SecurityContext().setTrustedCertificatesBytes(...)` — loads trust
+  # anchors from in-memory bytes. Informational: legitimate for pinned
+  # CA bundles but worth auditing because hardcoded bundles drift.
+  detector:
+    type: regex
+    pattern: '\.setTrustedCertificatesBytes\s*\('
+  message: "SecurityContext.setTrustedCertificatesBytes(...) — loads trust anchors from in-memory bytes; audit bundle provenance."
+  recommendation: "Confirm the bundle is rotated and not a hardcoded snapshot. Plan PQ-hybrid CA migration when ACME / CA ecosystem ships hybrid certs."
+  cwe: []
+  confidence: 0.5
+# ---------------------------------------------------------------------------
+# KDF strength — package:cryptography
+# ---------------------------------------------------------------------------
+- id: DART_PBKDF2_LOW_ITERATIONS
+  language: dart
+  category: weak-kdf
+  severity: high
+  algorithm: PBKDF2
+  usage_type: kdf
+  quantum_safety: vulnerable
+  # Heuristic: `Pbkdf2(macAlgorithm, iterations: N, ...)` with N below
+  # 10_000. OWASP 2023 recommends >=600_000 for PBKDF2-HMAC-SHA256, so
+  # under 10k is unambiguously weak. Pattern accepts 1-4 digit decimals
+  # or the exact literal 10000. Dart underscores in numeric literals
+  # (e.g. `100_000`) are intentionally NOT matched — those would fail the
+  # cap and therefore don't need flagging here. The `.*` (not `[^)]*`)
+  # before `\biterations:` lets the match cross intermediate parenthesized
+  # arguments like `macAlgorithm: Hmac.sha256()` — the scanner runs per
+  # line so there's no risk of crossing statements.
+  detector:
+    type: regex
+    pattern: 'Pbkdf2\s*\(.*\biterations:\s*(?:[1-9][0-9]{0,3}|10000)\b'
+  message: "Pbkdf2(iterations: <10000) — well below OWASP 2023 floor (600k for PBKDF2-HMAC-SHA256)."
+  recommendation: "Raise iterations to 600_000+ for SHA-256 or migrate to Argon2id (Argon2id()) for new password-hashing flows."
+  cwe: [916]
+  confidence: 0.8

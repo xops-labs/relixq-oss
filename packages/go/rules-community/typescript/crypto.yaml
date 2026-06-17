@@ -1,0 +1,82 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# TypeScript crypto rules
+# Routed through the same jstsast (goja + esbuild) runner as javascript;
+# TS-only syntax (type annotations, interfaces, enums, generics) is stripped
+# by esbuild before goja parses the source.
+- id: TS_CREATE_HASH_MD5
+  language: typescript
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:crypto.createHash"
+  message: "crypto.createHash detected. When called with 'md5' the digest is cryptographically broken."
+  recommendation: "Use SHA-256 or SHA-3. Argument-value matching will narrow this to MD5-only in a later release."
+  cwe: [328]
+  confidence: 0.85
+- id: TS_CREATE_HASH_SHA1
+  language: typescript
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: "createHash\\s*\\(\\s*['\"]sha1['\"]"
+  message: "createHash('sha1') — SHA-1 is cryptographically broken."
+  recommendation: "Use SHA-256 or SHA-3."
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const hash = crypto.createHash(''sha1'');'
+    no_match:
+      - 'const hash = crypto.createHash(''sha256'');'
+# Grover-tier symmetric strength: 128-bit AES and 3DES keep only ~64-bit
+# effective security against a quantum adversary (and 3DES is SWEET32-weak
+# classically). Argument-literal discrimination needs regex, not the AST DSL.
+- id: TS_CREATE_CIPHERIV_AES128
+  language: typescript
+  category: weak-cipher
+  severity: medium
+  algorithm: AES-128
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  key_size: 128
+  detector:
+    type: regex
+    pattern: 'createCipheriv\s*\(\s*[''"]aes-128-'
+  message: "createCipheriv with an aes-128-* cipher - 128-bit AES keys are weakened to ~64-bit security by Grover's algorithm."
+  recommendation: "Use AES-256 (e.g. aes-256-gcm) to retain a 128-bit security margin."
+  cwe: [326]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const cipher = crypto.createCipheriv(''aes-128-gcm'', key, iv);'
+    no_match:
+      - 'const cipher = crypto.createCipheriv(''aes-256-gcm'', key, iv);'
+- id: TS_CREATE_CIPHERIV_3DES
+  language: typescript
+  category: weak-cipher
+  severity: medium
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: 'createCipheriv\s*\(\s*[''"]des-ede3'
+  message: "createCipheriv with des-ede3* - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'const cipher = crypto.createCipheriv(''des-ede3-cbc'', key, iv);'
+    no_match:
+      - 'const cipher = crypto.createCipheriv(''aes-256-cbc'', key, iv);'

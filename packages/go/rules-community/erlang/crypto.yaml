@@ -1,0 +1,397 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Erlang crypto rules
+#
+# Erlang and Elixir share the BEAM VM and the same cryptographic primitives
+# (`crypto`, `public_key`, `ssl`, `rand`) — but Erlang's syntax uses a colon
+# between module and function (`crypto:hash(md5, Data)`) instead of Elixir's
+# atom-module form (`:crypto.hash(:md5, data)`). That single syntactic
+# difference makes Erlang's surface a separate rule pack: the leading
+# `:crypto.` token that anchors the Elixir rules does not appear in Erlang.
+#
+# Why this pack matters: Erlang sits underneath telecom and high-availability
+# infrastructure that runs at planetary scale — Ericsson's 4G/5G routing,
+# RabbitMQ message brokers, CouchDB replication, ejabberd / MongooseIM XMPP
+# servers, RIAK distributed KV, the OpenTelecom Platform behind several
+# national-scale telco backbones. A weak `crypto:hash(md5, ...)` in a session-
+# fingerprint or replication-id path can affect every subscriber on a
+# carrier network, and the long support contracts these systems run under
+# (OTP releases supported for 4+ years) make weak primitives sticky.
+#
+# Strategy: regex-only. To keep the dependency footprint small, no go.mod /
+# go-tree-sitter changes — `tree-sitter-erlang` exists upstream but pulling
+# it would serialize the 10-agent merge. Regex catches ~90% of practical
+# patterns because the Erlang call shape is highly regular:
+#
+#     module:function(Arg1, Arg2, ...)
+#
+# The `module:function(` colon-anchor is what makes per-line regex tractable
+# for Erlang specifically — there's no shadowing of `crypto`/`public_key`/
+# `ssl` in user space (module names are atoms, not values), so the false-
+# positive surface is very small.
+#
+# Routing note: Erlang is NOT yet plumbed through `internal/scanner/language.go`.
+# The plumbing covers the constant + extension-map
+# additions (`.erl`, `.hrl`) plus the `IsSourceLanguage` extension needed to
+# activate the pack. The YAML loads cleanly today; the rules won't fire on
+# `.erl` / `.hrl` files until the wire-in lands.
+#
+# Per-line semantics: the regex backend (internal/detectors/regex/regex.go)
+# matches each rule against each line independently. Patterns therefore assume
+# a single logical statement per line — the dominant case in idiomatic Erlang
+# (the comma-and-period clause structure naturally fits one expression per
+# line). Multi-line function-clause bodies are a known false-negative until
+# we move to AST.
+
+# ---------------------------------------------------------------------------
+# crypto:hash — broken hashes
+# ---------------------------------------------------------------------------
+- id: ERLANG_CRYPTO_HASH_MD5
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Matches `crypto:hash(md5, Data)` — the Erlang stdlib hash API. The `md5`
+  # digest atom (Erlang atoms are unquoted lowercase identifiers) is the
+  # discriminator; flexible whitespace handles both compact and expanded
+  # call forms.
+  detector:
+    type: regex
+    pattern: 'crypto:hash\s*\(\s*md5\b'
+  message: "crypto:hash(md5, ...) — MD5 is cryptographically broken (collisions since 2004)."
+  recommendation: "Use `crypto:hash(sha256, ...)` or `crypto:hash(sha3_256, ...)` (FIPS 202). For password hashing use Argon2 (argon2 NIF) or bcrypt (bcrypt NIF)."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_HASH_SHA1
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # NOTE: in Erlang's `crypto` module, the atom `sha` is SHA-1 (NOT SHA-2).
+  # `sha256` / `sha512` are the SHA-2 family. The bare `sha` is the legacy
+  # alias that trips developers who assume "sha" means "modern SHA-2".
+  # The trailing class excludes `sha256`, `sha512`, `sha3_*`, `sha224`.
+  detector:
+    type: regex
+    pattern: 'crypto:hash\s*\(\s*sha\b(?:[^_0-9a-zA-Z]|$)'
+  message: "crypto:hash(sha, ...) — `sha` in Erlang's crypto module is SHA-1, which is broken (SHAttered, 2017)."
+  recommendation: "Use `crypto:hash(sha256, ...)` or `crypto:hash(sha3_256, ...)` (FIPS 202)."
+  cwe: [328]
+  confidence: 0.93
+- id: ERLANG_CRYPTO_HASH_MD4
+  language: erlang
+  category: weak-hash
+  severity: critical
+  algorithm: MD4
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # MD4 is decades-broken; almost no legitimate use remains. Erlang's crypto
+  # module still exposes it as `md4` for legacy NTLM interop.
+  detector:
+    type: regex
+    pattern: 'crypto:hash\s*\(\s*md4\b'
+  message: "crypto:hash(md4, ...) — MD4 is cryptographically destroyed; collisions found in 1995."
+  recommendation: "Use `crypto:hash(sha256, ...)` or stronger. No legitimate modern use case for MD4 outside NTLMv1 interop (itself deprecated)."
+  cwe: [327, 328]
+  confidence: 0.98
+# ---------------------------------------------------------------------------
+# crypto:hmac / crypto:mac — weak HMAC digests
+# ---------------------------------------------------------------------------
+- id: ERLANG_CRYPTO_HMAC_MD5
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: HMAC-MD5
+  usage_type: mac
+  quantum_safety: classically_broken
+  # Legacy crypto:hmac/3 (OTP < 22). Removed in OTP 24, but legacy telecom
+  # codebases routinely still pin to older OTPs under long support contracts.
+  detector:
+    type: regex
+    pattern: 'crypto:hmac\s*\(\s*md5\b'
+  message: "crypto:hmac(md5, ...) — HMAC-MD5 is deprecated; legacy crypto:hmac/3 was removed in OTP 24."
+  recommendation: "Migrate to OTP 22+ MAC API: `crypto:mac(hmac, sha256, Key, Data)`. Avoid HMAC-MD5/SHA1 in new designs."
+  cwe: [328]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_HMAC_SHA1
+  language: erlang
+  category: weak-hash
+  severity: medium
+  algorithm: HMAC-SHA1
+  usage_type: mac
+  quantum_safety: classically_broken
+  # HMAC-SHA1 retains collision resistance for MAC use even after SHAttered,
+  # but it is deprecated for new designs (NIST SP 800-131A).
+  detector:
+    type: regex
+    pattern: 'crypto:hmac\s*\(\s*sha\b(?:[^_0-9a-zA-Z]|$)'
+  message: "crypto:hmac(sha, ...) — HMAC-SHA1 is deprecated for new designs (NIST SP 800-131A)."
+  recommendation: "Migrate to OTP 22+ MAC API: `crypto:mac(hmac, sha256, Key, Data)`."
+  cwe: [328]
+  confidence: 0.9
+- id: ERLANG_CRYPTO_MAC_HMAC_MD5
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: HMAC-MD5
+  usage_type: mac
+  quantum_safety: classically_broken
+  # OTP 22+ unified MAC API: `crypto:mac(hmac, Digest, Key, Data)`. The weak
+  # digest atom is the second argument.
+  detector:
+    type: regex
+    pattern: 'crypto:mac\s*\(\s*hmac\s*,\s*md5\b'
+  message: "crypto:mac(hmac, md5, ...) — HMAC-MD5 is deprecated."
+  recommendation: "Use `crypto:mac(hmac, sha256, Key, Data)` or HMAC-SHA3."
+  cwe: [328]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_MAC_HMAC_SHA1
+  language: erlang
+  category: weak-hash
+  severity: medium
+  algorithm: HMAC-SHA1
+  usage_type: mac
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'crypto:mac\s*\(\s*hmac\s*,\s*sha\b(?:[^_0-9a-zA-Z]|$)'
+  message: "crypto:mac(hmac, sha, ...) — HMAC-SHA1 is deprecated for new designs."
+  recommendation: "Use `crypto:mac(hmac, sha256, Key, Data)`."
+  cwe: [328]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# crypto:block_encrypt — legacy block-cipher API (OTP < 23, deprecated)
+# ---------------------------------------------------------------------------
+- id: ERLANG_CRYPTO_BLOCK_DES
+  language: erlang
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Matches `crypto:block_encrypt(des_cbc, ...)`, `des_ecb`, `des_cfb`,
+  # `des_ofb`, etc. — the legacy block-cipher API with the DES family.
+  detector:
+    type: regex
+    pattern: 'crypto:block_encrypt\s*\(\s*des_\w+\b'
+  message: "crypto:block_encrypt(des_*, ...) — single-DES (56-bit effective key) is broken; brute-force attacks since the 1990s."
+  recommendation: "Use AES-256-GCM via the OTP 22+ API: `crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, Plaintext, AAD, true)`."
+  cwe: [327]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_BLOCK_3DES
+  language: erlang
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  # Triple-DES is sunset per NIST SP 800-131A; deprecation through 2023, banned 2024+.
+  detector:
+    type: regex
+    pattern: 'crypto:block_encrypt\s*\(\s*des3_\w+\b'
+  message: "crypto:block_encrypt(des3_*, ...) — Triple-DES is deprecated (NIST SP 800-131A) and vulnerable to Sweet32."
+  recommendation: "Use AES-256-GCM via `crypto:crypto_one_time_aead(aes_256_gcm, ...)`."
+  cwe: [327]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_BLOCK_RC4
+  language: erlang
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # RC4 is forbidden by RFC 7465 in TLS contexts; biases in early keystream.
+  detector:
+    type: regex
+    pattern: 'crypto:block_encrypt\s*\(\s*rc4\b'
+  message: "crypto:block_encrypt(rc4, ...) — RC4 is broken (RFC 7465 prohibits it in TLS); keystream biases enable plaintext recovery."
+  recommendation: "Use AES-256-GCM or ChaCha20-Poly1305 via `crypto:crypto_one_time_aead/6`."
+  cwe: [327]
+  confidence: 0.97
+- id: ERLANG_CRYPTO_ONE_TIME_DES
+  language: erlang
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # OTP 22+ `crypto:crypto_one_time/4,5` is the modern replacement API but
+  # still accepts weak ciphers when callers pass weak atoms.
+  detector:
+    type: regex
+    pattern: 'crypto:crypto_one_time\s*\(\s*des_\w+\b'
+  message: "crypto:crypto_one_time(des_*, ...) — modern API call site, but DES is broken."
+  recommendation: "Switch the cipher atom to `aes_256_gcm` and use `crypto:crypto_one_time_aead/6` for AEAD semantics."
+  cwe: [327]
+  confidence: 0.95
+- id: ERLANG_CRYPTO_ONE_TIME_RC4
+  language: erlang
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: 'crypto:crypto_one_time\s*\(\s*rc4\b'
+  message: "crypto:crypto_one_time(rc4, ...) — RC4 is broken (RFC 7465)."
+  recommendation: "Use `aes_256_gcm` or `chacha20_poly1305` with `crypto:crypto_one_time_aead/6`."
+  cwe: [327]
+  confidence: 0.97
+# ---------------------------------------------------------------------------
+# crypto:generate_key / public_key:generate_key — RSA-1024 keygen
+# ---------------------------------------------------------------------------
+- id: ERLANG_RSA_KEYGEN_1024
+  language: erlang
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # `crypto:generate_key(rsa, {1024, E})` — modulus is the first element of
+  # the tuple. We allow optional opening brace because some callers omit it.
+  detector:
+    type: regex
+    pattern: 'crypto:generate_key\s*\(\s*rsa\s*,\s*\{?\s*1024\b'
+  message: "crypto:generate_key(rsa, {1024, _}) — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  recommendation: "Move off classical RSA entirely. Interim mitigation: 3072 or 4096 bits. PQC target: ML-KEM (FIPS 203) via OpenSSL 3.x OQS provider, exposed through `crypto` once OTP ships PQC primitives."
+  cwe: [326, 327]
+  confidence: 0.95
+- id: ERLANG_PUBLIC_KEY_RSA_1024
+  language: erlang
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  # `public_key:generate_key({rsa, 1024, E})` — the public_key module's
+  # tuple-form keygen.
+  detector:
+    type: regex
+    pattern: 'public_key:generate_key\s*\(\s*\{\s*rsa\s*,\s*1024\b'
+  message: "public_key:generate_key({rsa, 1024, _}) — 1024-bit RSA is below the NIST 2030 floor."
+  recommendation: "Use 3072 or 4096 bits as an interim step; plan migration to ML-KEM (FIPS 203) once OTP exposes PQC primitives."
+  cwe: [326, 327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# public_key:sign — weak signature digest
+# ---------------------------------------------------------------------------
+- id: ERLANG_PUBLIC_KEY_SIGN_MD5
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: RSA-MD5
+  usage_type: signing
+  quantum_safety: vulnerable
+  # `public_key:sign(Data, md5, Key)` — RSA-MD5 / ECDSA-MD5 signatures. The
+  # leading `public_key:sign(` plus an `md5` digest atom anywhere in the
+  # remaining argument list is the signal.
+  detector:
+    type: regex
+    pattern: 'public_key:sign\s*\([^)]*,\s*md5\b'
+  message: "public_key:sign(_, md5, _) — MD5 signature digest; trivially forgeable."
+  recommendation: "Use `sha256` (or `sha3_256`) as the digest atom. Plan migration to ML-DSA (FIPS 204) for post-quantum signatures."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: ERLANG_PUBLIC_KEY_SIGN_SHA1
+  language: erlang
+  category: weak-hash
+  severity: high
+  algorithm: RSA-SHA1
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: 'public_key:sign\s*\([^)]*,\s*sha\b(?:[^_0-9a-zA-Z]|$|\))'
+  message: "public_key:sign(_, sha, _) — SHA-1 signature digest; broken (SHAttered, 2017)."
+  recommendation: "Use `sha256` (or `sha3_256`). Plan migration to ML-DSA (FIPS 204)."
+  cwe: [328]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# ssl — deprecated TLS versions
+# ---------------------------------------------------------------------------
+- id: ERLANG_SSL_OLD_TLS_CONNECT
+  language: erlang
+  category: weak-protocol
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # `ssl:connect(Host, Port, [{versions, ['tlsv1.0', 'tlsv1.1']}, ...])` or
+  # the underscore-separated form `tlsv1_0`. Patterns target the `versions`
+  # tuple-key with a `tlsv1` atom that is either bare, `_0`, `_1`, `.0`, or
+  # `.1`. Erlang atoms with dots are quoted (`'tlsv1.0'`), bare otherwise.
+  detector:
+    type: regex
+    pattern: "ssl:connect\\s*\\([^)]*versions\\s*,\\s*\\[\\s*'?tlsv1[_\\.]?[01]?\\b"
+  message: "ssl:connect with TLS 1.0 or TLS 1.1 — deprecated (RFC 8996, March 2021); known weak cipher suites and downgrade exposure."
+  recommendation: "Use `{versions, ['tlsv1.3']}` (or at minimum `'tlsv1.2'`). Disable `tlsv1`, `'tlsv1.1'`, and `sslv3`."
+  cwe: [327, 757]
+  confidence: 0.92
+- id: ERLANG_SSL_OLD_TLS_LISTEN
+  language: erlang
+  category: weak-protocol
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Server-side equivalent of the connect rule.
+  detector:
+    type: regex
+    pattern: "ssl:listen\\s*\\([^)]*versions\\s*,\\s*\\[\\s*'?tlsv1\\b"
+  message: "ssl:listen with TLS 1.0 or TLS 1.1 — server permits deprecated TLS versions (RFC 8996)."
+  recommendation: "Use `{versions, ['tlsv1.3']}` (or at minimum `'tlsv1.2'`)."
+  cwe: [327, 757]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# Application environment — deprecated TLS pinned in sys.config / app env
+# ---------------------------------------------------------------------------
+- id: ERLANG_APP_ENV_OLD_TLS
+  language: erlang
+  category: weak-protocol
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  # Erlang/OTP applications pin TLS versions in `application:get_env(_, _)` /
+  # `application:set_env(_, _, _)` calls referencing `ssl_versions`. RabbitMQ,
+  # ejabberd, and several telco-OTP releases ship sys.config defaults that
+  # still allow tlsv1.0/tlsv1.1; this rule surfaces the read side so we can
+  # flag the call sites that depend on those defaults.
+  detector:
+    type: regex
+    pattern: 'application\s*:\s*get_env\s*\([^)]*ssl_versions[^)]*tlsv1\b'
+  message: "application:get_env(..., ssl_versions, ...) reads a TLS-version list that includes tlsv1 — likely a deprecated default in sys.config."
+  recommendation: "Update sys.config to pin `{ssl_versions, ['tlsv1.3']}` (or at minimum `'tlsv1.2'`) and audit every reader for downgrade exposure."
+  cwe: [327, 757]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# rand — non-cryptographic PRNG paired with crypto context
+# ---------------------------------------------------------------------------
+- id: ERLANG_WEAK_PRNG_RAND_UNIFORM
+  language: erlang
+  category: weak-prng
+  severity: medium
+  algorithm: PRNG
+  usage_type: random_generation
+  quantum_safety: vulnerable
+  # Heuristic: BEAM's `rand` module is explicitly non-cryptographic. We flag
+  # `rand:uniform` only when the same line mentions Key / Nonce / IV / Token
+  # / Secret / Crypto — a strong hint the caller is using it for crypto
+  # material. Erlang variables are capitalized, so the class is uppercase-
+  # initial. The context word can appear either before (assignment target)
+  # or after (argument) the rand:uniform call.
+  detector:
+    type: regex
+    pattern: '\b(?:Key|Nonce|IV|Iv|Token|Secret|Crypto|crypto)\b[^\r\n]*rand:uniform\b|rand:uniform\b[^\r\n]*\b(?:Key|Nonce|IV|Iv|Token|Secret|Crypto|crypto)\b'
+  message: "rand:uniform used in a Key/Nonce/IV/Token/Secret context — BEAM's rand module is non-cryptographic (predictable from observed outputs)."
+  recommendation: "Use `crypto:strong_rand_bytes(N)` for cryptographic randomness."
+  cwe: [330, 338]
+  confidence: 0.8

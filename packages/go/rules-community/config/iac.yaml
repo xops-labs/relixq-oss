@@ -1,0 +1,69 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+- id: IAC_DOCKERFILE_OLD_TLS
+  language: dockerfile
+  category: weak-tls
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # No leading \b: "--" follows whitespace, and \b cannot assert between two
+    # non-word chars (the original pattern was unmatchable). The terminator
+    # class keeps the bare --tlsv1 alternative from prefix-matching --tlsv1.2+.
+    pattern: '(--ssl-?protocol\b|--tlsv1(\.[01])?([ \t";]|$))'
+    flags: i
+  message: "Dockerfile pins a deprecated TLS version on a build/run command."
+  recommendation: "Drop the explicit --tlsv1.0/1.1 flag and rely on TLS 1.2+ defaults."
+  cwe: [327]
+  confidence: 0.8
+  examples:
+    match:
+      - 'RUN curl --tlsv1.0 https://artifacts.example.com/pkg.tgz'
+      - 'RUN curl --tlsv1 https://legacy.example.com'
+      - 'RUN wget --ssl-protocol=TLSv1 https://legacy.example.com'
+    no_match:
+      - 'RUN curl --tlsv1.2 https://artifacts.example.com/pkg.tgz'
+      - 'RUN curl --tlsv1.3 https://example.com'
+- id: IAC_TERRAFORM_TLS_OLD_VERSION
+  language: terraform
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '"(TLSv?1\.0|TLSv?1\.1|tls_1_0|tls_1_1)"'
+    flags: i
+  message: "Terraform provisions infra with a deprecated TLS minimum version."
+  recommendation: "Set min_tls_version to TLS_1_2 or TLS_1_3."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - '  minimum_protocol_version = "TLSv1.1"'
+    no_match:
+      - '  minimum_protocol_version = "TLSv1.2_2021"'
+- id: IAC_K8S_DEPRECATED_TLS_CIPHER
+  language: yaml
+  category: weak-cipher
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml"]
+  detector:
+    type: regex
+    pattern: '(TLS_RSA_WITH_RC4|TLS_RSA_WITH_3DES_EDE_CBC|TLS_DHE_RSA_WITH_DES_CBC)'
+  message: "Kubernetes/ingress manifest references a broken cipher suite."
+  recommendation: "Restrict cipher suites to AEAD ciphers (AES-GCM, ChaCha20-Poly1305) under TLS 1.2+ or use TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - '    - --tls-cipher-suites=TLS_RSA_WITH_3DES_EDE_CBC_SHA'
+    no_match:
+      - '    - --tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256'

@@ -1,0 +1,79 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: JULIA_MBEDTLS_RSA_KEYSIZE_WEAK
+  language: julia
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: "(?:MbedTLS\\.)?RSAKeyPair\\s*\\(\\s*1024\\b"
+  message: "RSAKeyPair(1024) — 1024-bit RSA is below the NIST 2030 floor and quantum-vulnerable."
+  cwe: [326, 327]
+  confidence: 0.95
+
+- id: JULIA_MBEDTLS_RSA_CALL
+  language: julia
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bMbedTLS\\.RSAKeyPair\\s*\\("
+  message: "MbedTLS.RSAKeyPair(...) — RSA is quantum-vulnerable."
+  cwe: [327]
+
+- id: JULIA_USING_NETTLE
+  language: julia
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Nettle"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\busing\\s+Nettle\\b"
+  message: "`using Nettle` — Nettle.jl in scope; review for DES/3DES/RC4 and MD5/SHA1 primitives."
+
+- id: JULIA_USING_MBEDTLS
+  language: julia
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "MbedTLS"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\busing\\s+MbedTLS\\b"
+  message: "`using MbedTLS` — MbedTLS.jl in scope; quantum-vulnerable RSA/ECDSA primitives present."
+
+- id: JULIA_IMPORT_MBEDTLS
+  language: julia
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "MbedTLS"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+MbedTLS\\b"
+  message: "`import MbedTLS` — MbedTLS.jl in scope; quantum-vulnerable RSA/ECDSA primitives present."

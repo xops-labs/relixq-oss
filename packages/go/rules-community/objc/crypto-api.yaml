@@ -1,0 +1,55 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: OBJC_IMPORT_COMMONCRYPTO
+  language: objc
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "unknown"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "^\\s*#\\s*import\\s*[<\"]CommonCrypto/CommonCrypto\\.h[>\"]"
+  message: "#import <CommonCrypto/CommonCrypto.h> — legacy C-shim crypto surface; review for MD5/SHA1/DES/3DES/RC4 usage."
+  cwe: [327]
+  confidence: 0.6
+
+- id: OBJC_KEY_TYPE_RSA
+  language: objc
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bkSecAttrKeyTypeRSA\\b"
+  message: "kSecAttrKeyTypeRSA — RSA is quantum-vulnerable; Shor's algorithm breaks it on a CRQC."
+  cwe: [327]
+  confidence: 0.9
+
+- id: OBJC_KEY_TYPE_EC
+  language: objc
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bkSecAttrKeyTypeEC(?:SECPrimeRandom)?\\b"
+  message: "kSecAttrKeyTypeEC[SECPrimeRandom] — classical ECC is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.9

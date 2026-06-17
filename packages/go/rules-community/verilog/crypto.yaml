@@ -1,0 +1,194 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Verilog / SystemVerilog crypto rules
+# (hardware root-of-trust / silicon vertical).
+#
+# This pack scans Verilog HDL and SystemVerilog source for quantum-vulnerable
+# hardware crypto IP: RSA / ECDSA / ECC accelerators, broken hash and symmetric
+# IP cores (SHA-1, MD5, DES, RC4, 3DES), AES S-box ROMs, and parameter
+# declarations that bake key material, moduli, or small RSA public exponents
+# into silicon. As of 2026 no production PQC scanner covers HDL — this is a
+# greenfield pack and the rule set is intentionally MVP. The ontology will
+# mature as the silicon vertical gathers feedback.
+#
+# Strategy: regex-only. Tree-sitter-verilog exists in the smacker module set
+# but vendoring it requires a CGO wrapper and a go.mod change that the
+# lean-dependency goal here rules out. Verilog's module / parameter /
+# port syntax is regular enough that regex catches the practical patterns
+# without false-positive sprawl. AST polish can land later when a binding is
+# vendored.
+#
+# SystemVerilog is treated as a superset of Verilog for v1: the same patterns
+# fire on `.v` / `.vh` / `.sv` / `.svh` files. SV-specific constructs (classes,
+# interfaces, packages) are not modeled yet; module-level crypto IP is the
+# dominant case and matches across both dialects.
+#
+# Regex matches are line-by-line; no multi-line patterns are used. All
+# patterns are RE2-compatible (no lookahead/lookbehind).
+
+# ---------------------------------------------------------------------------
+# Module declarations — RSA / ECC / ECDSA accelerator IP
+# ---------------------------------------------------------------------------
+- id: VERILOG_MODULE_SHA1
+  language: verilog
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hardware_ip
+  quantum_safety: classically_broken
+  # Any module whose name starts `sha1_` (e.g. `sha1_core`, `sha1_engine`,
+  # `sha1_top`). SHA-1 is classically broken (collision attacks since 2017)
+  # and Grover further halves preimage security.
+  detector:
+    type: regex
+    pattern: 'module\s+sha1_\w+\b'
+  message: "SHA-1 hardware IP core — classically broken (collision attacks) and quantum-weakened."
+  recommendation: "Replace with SHA-256 / SHA-384 / SHA-3 hardware accelerators. For PQC-resistant integrity, SHA3-512 / SHAKE256 keep ample margin under Grover."
+  cwe: [328]
+  confidence: 0.95
+- id: VERILOG_MODULE_MD5
+  language: verilog
+  category: weak-hash
+  severity: critical
+  algorithm: MD5
+  usage_type: hardware_ip
+  quantum_safety: classically_broken
+  # MD5 hardware IP. MD5 is comprehensively broken (collisions, chosen-prefix
+  # attacks) — its presence in silicon is unambiguously a finding.
+  detector:
+    type: regex
+    pattern: 'module\s+md5_\w+\b'
+  message: "MD5 hardware IP core — comprehensively broken; collisions are trivial."
+  recommendation: "Remove from any security-relevant flow. MD5 may be acceptable only for non-security checksums (e.g. legacy compatibility); flag the IP for audit and removal."
+  cwe: [327, 328]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Module declarations — broken symmetric IP cores
+# ---------------------------------------------------------------------------
+- id: VERILOG_MODULE_DES_CORE
+  language: verilog
+  category: weak-cipher
+  severity: critical
+  algorithm: DES
+  usage_type: hardware_ip
+  quantum_safety: classically_broken
+  # DES hardware IP: `des_core`, `des_encrypt`, `des_decrypt`. 56-bit key is
+  # classically broken (EFF DES Cracker, 1998); Grover halves it further.
+  detector:
+    type: regex
+    pattern: 'module\s+des_(?:core|encrypt|decrypt)\b'
+  message: "DES hardware IP core — 56-bit key, classically broken."
+  recommendation: "Replace with AES-256 hardware. For PQC, AES-256 retains ~128-bit security under Grover and remains acceptable for symmetric encryption."
+  cwe: [327]
+  confidence: 0.95
+- id: VERILOG_MODULE_3DES
+  language: verilog
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: hardware_ip
+  quantum_safety: grover_weakened
+  # Triple-DES IP. NIST disallowed for new applications after 2023; effective
+  # security around 112 bits classically and ~56 under Grover.
+  detector:
+    type: regex
+    pattern: 'module\s+3des_\w+\b'
+  message: "Triple-DES (3DES) hardware IP core — disallowed by NIST SP 800-131A after 2023."
+  recommendation: "Replace with AES-256. 3DES is on the explicit NIST sunset list."
+  cwe: [327]
+  confidence: 0.95
+- id: VERILOG_MODULE_RC4
+  language: verilog
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: hardware_ip
+  quantum_safety: classically_broken
+  # RC4 IP. Broken since 2013 (biases, plaintext recovery); deprecated by
+  # every major standards body.
+  detector:
+    type: regex
+    pattern: 'module\s+rc4_\w+\b'
+  message: "RC4 hardware IP core — comprehensively broken (RFC 7465 prohibits in TLS)."
+  recommendation: "Replace with AES-256-GCM or ChaCha20-Poly1305 hardware. RC4 has no acceptable use in 2026."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Parameter declarations — algorithm-specific magic constants
+# ---------------------------------------------------------------------------
+- id: VERILOG_PARAM_SHA1_H0
+  language: verilog
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: constant
+  quantum_safety: classically_broken
+  # SHA-1's initial hash value H0 = 0x67452301. Catches `parameter SHA1_H0 =
+  # 32'h67452301;` and similar — a strong signal a SHA-1 engine lives in this
+  # source file even without a matching `module sha1_*` declaration.
+  detector:
+    type: regex
+    pattern: "parameter\\s+SHA1_H0\\s*=\\s*32'h67452301"
+  message: "SHA-1 initial hash constant H0 (0x67452301) — SHA-1 engine fingerprint in HDL."
+  recommendation: "See VERILOG_MODULE_SHA1 — replace SHA-1 engine with SHA-256 / SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: VERILOG_PARAM_MD5_A
+  language: verilog
+  category: weak-hash
+  severity: critical
+  algorithm: MD5
+  usage_type: constant
+  quantum_safety: classically_broken
+  # MD5's initial state constant A = 0x67452301. (Note: MD5_A and SHA1_H0
+  # share the literal value; we discriminate via the parameter name.) A
+  # `parameter MD5_A = 32'h67452301` is a hard fingerprint of an MD5 engine.
+  detector:
+    type: regex
+    pattern: "parameter\\s+MD5_A\\s*=\\s*32'h67452301"
+  message: "MD5 initial state constant A (0x67452301) — MD5 engine fingerprint in HDL."
+  recommendation: "See VERILOG_MODULE_MD5 — remove MD5 from silicon."
+  cwe: [327, 328]
+  confidence: 0.97
+- id: VERILOG_PARAM_RSA_MODULUS
+  language: verilog
+  category: hardcoded-key
+  severity: high
+  algorithm: RSA
+  usage_type: constant
+  quantum_safety: vulnerable
+  # Heuristic: a `parameter` whose name contains MODULUS, set to a Verilog
+  # sized hex literal. Width is not constrained — RSA moduli are 1024+ bits
+  # but the parser-side check on bit width is awkward in regex, so we accept
+  # any sized hex constant and let the human reviewer verify. RSA moduli
+  # baked into silicon are both a quantum-vulnerability signal and an
+  # operational risk (no key rotation possible).
+  detector:
+    type: regex
+    pattern: "parameter\\s+(?:\\[[^\\]]+\\]\\s+)?\\w*MODULUS\\w*\\s*=\\s*\\d+'h[0-9a-fA-F]+"
+  message: "Parameter named *MODULUS* with hex literal — likely hardcoded RSA modulus in silicon."
+  recommendation: "Avoid baking RSA moduli into silicon. Hardcoded keys cannot be rotated; the IP becomes permanently quantum-vulnerable. Move to a key-injection flow with PQC-ready key formats (ML-KEM, hybrid)."
+  cwe: [321, 798, 327]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Port signatures — exposed RSA / ECC parameters and legacy crypto outputs
+# ---------------------------------------------------------------------------
+- id: VERILOG_PORT_PRIVATE_KEY
+  language: verilog
+  category: key-exposure
+  severity: critical
+  algorithm: PrivateKey
+  usage_type: port
+  quantum_safety: vulnerable
+  # Module input port named modulus / exponent / private_key / d_param.
+  # The `d_param` name matches RSA's private-exponent convention. Exposing
+  # private-key material on a module port is both a quantum-vulnerability
+  # signal (legacy RSA/ECDSA) and a side-channel concern.
+  detector:
+    type: regex
+    pattern: 'input\s+\[\d+:0\]\s*(?:modulus|exponent|private_key|d_param)\b'
+  message: "Module input port exposes RSA/ECC parameter (modulus / exponent / private_key / d_param)."
+  recommendation: "Avoid exposing private-key material on top-level ports — risks probing-based side-channel attacks and indicates legacy RSA/ECC IP. Move to internal key injection with a PQC-ready interface."
+  cwe: [321, 200, 327]
+  confidence: 0.85

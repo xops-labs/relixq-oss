@@ -1,0 +1,12 @@
+# Scanner-side ignore file for the validation corpus.
+#
+# 1. Its presence shadows the sibling .gitignore in the suppression loader
+#    (.relixqignore wins), so the git-only `!vendor/` re-include there cannot
+#    leak into scan behavior — the walker's default vendored-dir policy stays
+#    authoritative (vendor/legacylib/sign.py is policy_excluded, not gated).
+# 2. It excludes the harness metadata files below from the scan so the
+#    ground-truth manifest (which is full of algorithm names) can never
+#    produce findings about itself.
+/expected-findings.yaml
+/README.md
+/.gitignore

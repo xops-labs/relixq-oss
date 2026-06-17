@@ -1,0 +1,71 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api detection — C# AST PRECISION layer (Roslyn).
+#
+# These rules share their ids with the regex floor in crypto-api.yaml on
+# purpose. When the bundled relixq-roslyn binary is present, the C# AST runner
+# fires these (anchored to syntax nodes, not text) and the scanner suppresses
+# the regex finding for the same (id, line) — see scanner.supersedeKey. When the
+# binary is absent the AST runner yields nothing and the regex floor stands, so
+# C# crypto-api detection degrades gracefully rather than disappearing.
+- id: CSHARP_RSA_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "call:RSA.Create"
+  message: "RSA.Create detected. RSA is quantum-vulnerable (Shor's algorithm)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: CSHARP_RSA_PROVIDER
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "new:RSACryptoServiceProvider"
+  message: "RSACryptoServiceProvider instantiated. RSA is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.97
+
+- id: CSHARP_ECDSA_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: ECDSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "call:ECDsa.Create"
+  message: "ECDSA detected. Elliptic-curve signatures are quantum-vulnerable (Shor's algorithm)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: CSHARP_ECDH_CREATE
+  language: csharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: ECDH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "call:ECDiffieHellman.Create"
+  message: "ECDH detected. Elliptic-curve key exchange is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95

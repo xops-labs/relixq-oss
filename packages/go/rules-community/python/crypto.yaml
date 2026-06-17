@@ -1,0 +1,49 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Python symmetric-cipher rules
+# Regex floor only: AES-128 vs AES-256 discrimination for AES.new(...) needs
+# key-length dataflow (AST tier) and is intentionally NOT attempted here — a
+# bare AES.new( pattern would false-positive on AES-256.
+- id: PYTHON_TRIPLE_DES_CIPHER
+  language: python
+  category: weak-cipher
+  severity: medium
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '\balgorithms\.TripleDES\s*\('
+  message: "cryptography.hazmat algorithms.TripleDES - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'cipher = Cipher(algorithms.TripleDES(key), modes.CBC(iv))'
+    no_match:
+      - 'cipher = Cipher(algorithms.AES(key), modes.GCM(iv))'
+- id: PYTHON_PYCRYPTODOME_DES3
+  language: python
+  category: weak-cipher
+  severity: medium
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '\bDES3\.new\s*\('
+  message: "PyCryptodome DES3.new - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'cipher = DES3.new(key, DES3.MODE_CBC, iv)'
+    no_match:
+      - 'cipher = AES.new(key, AES.MODE_GCM)'

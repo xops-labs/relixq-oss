@@ -1,0 +1,426 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# OpenSSL master-config (openssl.cnf) crypto rules
+# (Tier 3.6, system-wide crypto policy).
+#
+# openssl.cnf is small but extraordinarily high-signal: a handful of
+# directives in `[system_default_sect]` set the *system-wide* TLS posture
+# (MinProtocol / CipherString / Ciphersuites). Other sections control CA
+# defaults (default_md / default_bits) and provider activation (legacy
+# provider, oqs-provider for PQC opt-in). Every line below targets one of
+# those high-leverage directives.
+#
+# Strategy: regex-only, per-line. INI-style `key = value` patterns match
+# cleanly without an INI parser. The rules use a dedicated
+# `language: openssl-cnf` constant so they do not accidentally fire on
+# arbitrary .ini / .cnf files used for other purposes.
+#
+# Glob fallback (`file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf"]`)
+# keeps each rule from firing if a future language remap routes generic
+# .cnf files to LangOpenSSLConf — the glob narrows back to the canonical
+# filename pattern.
+- id: OPENSSLCNF_MIN_PROTOCOL_SSLV3
+  language: openssl-cnf
+  category: weak-tls
+  severity: critical
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*MinProtocol\s*=\s*SSLv3\b'
+    flags: i
+  message: "openssl.cnf MinProtocol pins SSLv3 — POODLE-vulnerable and removed from every modern OpenSSL build."
+  recommendation: "Set MinProtocol = TLSv1.2 (or TLSv1.3) in [system_default_sect]."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc7568"
+  cwe: [327, 326]
+  confidence: 0.99
+  examples:
+    match:
+      - 'MinProtocol = SSLv3'
+    no_match:
+      - 'MinProtocol = TLSv1.3'
+- id: OPENSSLCNF_MIN_PROTOCOL_TLSV1
+  language: openssl-cnf
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*MinProtocol\s*=\s*TLSv1(?:\.0)?\s*$'
+    flags: i
+  message: "openssl.cnf MinProtocol pins TLSv1.0 — deprecated by RFC 8996."
+  recommendation: "Set MinProtocol = TLSv1.2 minimum; prefer TLSv1.3."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc8996"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'MinProtocol = TLSv1'
+    no_match:
+      - 'MinProtocol = TLSv1.2'
+- id: OPENSSLCNF_MIN_PROTOCOL_TLSV11
+  language: openssl-cnf
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*MinProtocol\s*=\s*TLSv1\.1\b'
+    flags: i
+  message: "openssl.cnf MinProtocol pins TLSv1.1 — deprecated by RFC 8996."
+  recommendation: "Set MinProtocol = TLSv1.2 minimum; prefer TLSv1.3."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc8996"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'MinProtocol = TLSv1.1'
+    no_match:
+      - 'MinProtocol = TLSv1.2'
+- id: OPENSSLCNF_MIN_PROTOCOL_TLSV12_INVENTORY
+  language: openssl-cnf
+  category: weak-tls
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*MinProtocol\s*=\s*TLSv1\.2\b'
+    flags: i
+  message: "openssl.cnf MinProtocol = TLSv1.2 — current acceptable minimum but flagged for PQC inventory (TLS 1.3 is required for the hybrid PQC handshake extensions)."
+  recommendation: "Migrate to MinProtocol = TLSv1.3 once the client population permits, so the path is open to hybrid PQC key exchange (e.g. X25519MLKEM768)."
+  cwe: [326]
+  confidence: 0.7
+  examples:
+    match:
+      - 'MinProtocol = TLSv1.2'
+    no_match:
+      - 'MinProtocol = TLSv1.3'
+- id: OPENSSLCNF_CIPHERSTRING_RC4
+  language: openssl-cnf
+  category: weak-cipher
+  severity: critical
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*CipherString\s*=\s*[^#\r\n]*\bRC4\b'
+    flags: i
+  message: "openssl.cnf CipherString references the broken RC4 stream cipher."
+  recommendation: "Remove RC4. Use the DEFAULT@SECLEVEL=2 profile or an explicit AEAD list (e.g. ECDHE+AESGCM:ECDHE+CHACHA20)."
+  references:
+    - "https://datatracker.ietf.org/doc/html/rfc7465"
+  cwe: [327]
+  confidence: 0.97
+  examples:
+    match:
+      - 'CipherString = RC4-SHA:HIGH'
+    no_match:
+      - 'CipherString = HIGH:!aNULL'
+- id: OPENSSLCNF_CIPHERSTRING_DES_3DES
+  language: openssl-cnf
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*CipherString\s*=\s*[^#\r\n]*\b(3DES|DES-CBC3|DES_CBC3|DES)\b'
+    flags: i
+  message: "openssl.cnf CipherString references DES/3DES — vulnerable to SWEET32 birthday attacks."
+  recommendation: "Remove DES/3DES. Use AES-GCM or ChaCha20-Poly1305 suites."
+  references:
+    - "https://sweet32.info/"
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'CipherString = DES-CBC3-SHA'
+    no_match:
+      - 'CipherString = ECDHE-ECDSA-AES256-GCM-SHA384'
+- id: OPENSSLCNF_CIPHERSTRING_MD5
+  language: openssl-cnf
+  category: weak-cipher
+  severity: high
+  algorithm: MD5
+  usage_type: integrity
+  quantum_safety: classically_broken
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*CipherString\s*=\s*[^#\r\n]*\bMD5\b'
+    flags: i
+  message: "openssl.cnf CipherString references MD5-based MAC cipher suites."
+  recommendation: "Drop MD5-MAC suites. Prefer SHA-256+ AEAD suites or TLS 1.3 defaults."
+  cwe: [327]
+  confidence: 0.9
+  examples:
+    match:
+      - 'CipherString = RC4-MD5'
+    no_match:
+      - 'CipherString = HIGH:!aNULL'
+- id: OPENSSLCNF_CIPHERSTRING_EXPORT_LOW
+  language: openssl-cnf
+  category: weak-cipher
+  severity: critical
+  algorithm: EXPORT
+  usage_type: encryption
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*CipherString\s*=\s*[^#\r\n]*\b(EXPORT|EXP-|LOW|MEDIUM|NULL)\b'
+    flags: i
+  message: "openssl.cnf CipherString includes EXPORT / LOW / MEDIUM / NULL cipher classes — FREAK and Logjam exposure."
+  recommendation: "Drop the EXPORT/LOW/MEDIUM/NULL classes. Pin an explicit modern AEAD list (e.g. ECDHE+AESGCM:ECDHE+CHACHA20:!aNULL:!eNULL:!EXPORT:!LOW:!MEDIUM)."
+  references:
+    - "https://freakattack.com/"
+    - "https://weakdh.org/"
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'CipherString = LOW:EXPORT40'
+    no_match:
+      - 'CipherString = HIGH:!aNULL'
+- id: OPENSSLCNF_CIPHERSTRING_DEFAULT
+  language: openssl-cnf
+  category: misconfig
+  severity: info
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*CipherString\s*=\s*DEFAULT\s*$'
+    flags: i
+  message: "openssl.cnf CipherString = DEFAULT — relies on the OpenSSL build's compiled-in default cipher list, which varies across distributions and versions."
+  recommendation: "Pin an explicit, audited cipher list (e.g. DEFAULT@SECLEVEL=2, or an ECDHE+AEAD allowlist). Distro defaults have re-enabled weak suites historically."
+  cwe: [757]
+  confidence: 0.5
+  examples:
+    match:
+      - 'CipherString = DEFAULT'
+    no_match:
+      - 'CipherString = DEFAULT@SECLEVEL=2'
+- id: OPENSSLCNF_DEFAULT_MD_MD5
+  language: openssl-cnf
+  category: weak-hash
+  severity: critical
+  algorithm: MD5
+  usage_type: integrity
+  quantum_safety: classically_broken
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_md\s*=\s*md5\b'
+    flags: i
+  message: "openssl.cnf default_md = md5 — CA will sign certificates with MD5, which has practical collision attacks."
+  recommendation: "Set default_md = sha256 (or sha384/sha512) in the CA section."
+  references:
+    - "https://www.win.tue.nl/hashclash/rogue-ca/"
+  cwe: [328]
+  confidence: 0.99
+  examples:
+    match:
+      - 'default_md = md5'
+    no_match:
+      - 'default_md = sha256'
+- id: OPENSSLCNF_DEFAULT_MD_SHA1
+  language: openssl-cnf
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: integrity
+  quantum_safety: classically_broken
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_md\s*=\s*sha1\b'
+    flags: i
+  message: "openssl.cnf default_md = sha1 — SHAttered collision attacks are practical; major CAs and browsers have deprecated SHA-1 signatures."
+  recommendation: "Set default_md = sha256 (or stronger)."
+  references:
+    - "https://shattered.io/"
+  cwe: [328]
+  confidence: 0.95
+  examples:
+    match:
+      - 'default_md = sha1'
+    no_match:
+      - 'default_md = sha256'
+- id: OPENSSLCNF_DEFAULT_MD_SHA256_INVENTORY
+  language: openssl-cnf
+  category: weak-hash
+  severity: info
+  algorithm: SHA256
+  usage_type: integrity
+  quantum_safety: grover_weakened
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_md\s*=\s*sha256\b'
+    flags: i
+  message: "openssl.cnf default_md = sha256 — currently strong, flagged for PQ inventory (Grover halves the effective security margin)."
+  recommendation: "Plan migration to SHA-384 / SHA-512 where signature size permits. SHA-256 is not broken but is the minimum acceptable digest."
+  cwe: [326]
+  confidence: 0.5
+  examples:
+    match:
+      - 'default_md = sha256'
+    no_match:
+      - 'default_md = sha384'
+- id: OPENSSLCNF_DEFAULT_BITS_1024
+  language: openssl-cnf
+  category: weak-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_bits\s*=\s*1024\b'
+  message: "openssl.cnf default_bits = 1024 — RSA-1024 is factorable by well-funded adversaries and rejected by every public CA."
+  recommendation: "Set default_bits = 3072 minimum (or 4096) for RSA. For new deployments, prefer ECC (secp384r1) or PQC (ML-DSA / Dilithium) keys."
+  cwe: [326]
+  confidence: 0.99
+  examples:
+    match:
+      - 'default_bits = 1024'
+    no_match:
+      - 'default_bits = 2048'
+- id: OPENSSLCNF_DEFAULT_BITS_2048
+  language: openssl-cnf
+  category: weak-key
+  severity: info
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 2048
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_bits\s*=\s*2048\b'
+  message: "openssl.cnf default_bits = 2048 — currently acceptable but flagged for PQC inventory (Shor's algorithm breaks RSA-2048 on a sufficiently large quantum computer)."
+  recommendation: "Plan migration to RSA-3072+ or a PQC signature algorithm (ML-DSA / Dilithium) before quantum-capable adversaries materialize."
+  cwe: [326]
+  confidence: 0.5
+  examples:
+    match:
+      - 'default_bits = 2048'
+    no_match:
+      - 'default_bits = 4096'
+- id: OPENSSLCNF_DEFAULT_PUBKEY_ALGORITHM_DSA
+  language: openssl-cnf
+  category: weak-key
+  severity: high
+  algorithm: DSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*default_pubkey_algorithm\s*=\s*(DSA|dsa)\b'
+  message: "openssl.cnf default_pubkey_algorithm = DSA — DSA is removed from TLS 1.3 and quantum-vulnerable."
+  recommendation: "Switch to ECDSA (P-256+) or, for forward-looking deployments, ML-DSA (Dilithium)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'default_pubkey_algorithm = dsa'
+    no_match:
+      - 'default_pubkey_algorithm = rsa'
+- id: OPENSSLCNF_LEGACY_PROVIDER_ENABLED
+  language: openssl-cnf
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*legacy\s*=\s*legacy_sect\s*$'
+    flags: i
+  message: "openssl.cnf activates the legacy provider — re-enables MD2/MD4/MDC2/RC2/RC4/RC5/DES/Blowfish/CAST/IDEA/SEED/Whirlpool which OpenSSL 3 disabled by default."
+  recommendation: "Remove `legacy = legacy_sect` from [provider_sect] unless a specific application requires a named legacy algorithm; if so, scope the workaround to that process, not the system-wide config."
+  references:
+    - "https://www.openssl.org/docs/man3.0/man7/OSSL_PROVIDER-legacy.html"
+  cwe: [327]
+  confidence: 0.85
+  examples:
+    match:
+      - 'legacy = legacy_sect'
+    no_match:
+      - 'default = default_sect'
+- id: OPENSSLCNF_OPTIONS_COMPRESSION_ENABLED
+  language: openssl-cnf
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  # RE2 has no negative lookahead, so we cannot match "Options line lacking
+  # NoCompression" directly. Instead we match explicit positive anti-patterns:
+  # `enable_compression = yes/true/on/1` (the OpenSSL directive that turns
+  # CRIME-vulnerable compression back on). The line-anchored, value-truthy
+  # form is unambiguous and avoids the NoCompression substring collision
+  # entirely.
+  detector:
+    type: regex
+    pattern: '^\s*enable_compression\s*=\s*(yes|true|on|1)\b'
+    flags: i
+  message: "openssl.cnf explicitly enables TLS Compression — CRIME-style compression oracle attack exposure."
+  recommendation: "Set Options to include NoCompression (e.g. Options = ServerPreference,NoCompression) and remove any enable_compression flag."
+  references:
+    - "https://en.wikipedia.org/wiki/CRIME"
+  cwe: [310]
+  confidence: 0.7
+  examples:
+    match:
+      - 'enable_compression = yes'
+    no_match:
+      - 'enable_compression = no'
+- id: OPENSSLCNF_ENGINE_LEGACY
+  language: openssl-cnf
+  category: misconfig
+  severity: medium
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["openssl.cnf", "*.openssl.cnf", "openssl-*.cnf", "*.cnf"]
+  detector:
+    type: regex
+    pattern: '^\s*(default_algorithms|engine_id|dynamic_path)\s*=\s*[^#\r\n]*(legacy|gost|cryptodev)\b'
+    flags: i
+  message: "openssl.cnf references a legacy crypto ENGINE — engines often expose primitives (GOST, MDC2, RC2) that the platform otherwise withholds."
+  recommendation: "Remove the ENGINE reference unless explicitly required. Prefer the OpenSSL 3 provider model with audited providers (default + fips, optionally oqsprovider for PQC)."
+  cwe: [327]
+  confidence: 0.7
+  examples:
+    match:
+      - 'dynamic_path = /usr/lib/engines/libgost.so'
+    no_match:
+      - 'dynamic_path = /usr/lib/engines/libcapi.so'

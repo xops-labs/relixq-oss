@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# C# crypto rules
+# AST rules use the csharpast (Roslyn) runner query format:
+#   call:<Type>.<Method>      — Type.Method(...) invocations
+#   new:<Type>                — new Type(...) constructor calls
+#   using:<Namespace>         — using Namespace; directives
+#   memberref:<Type>.<Member> — Type.Member member-access expressions
+- id: CSHARP_RSA_KEYSIZE_WEAK
+  language: csharp
+  category: weak-key
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: '\bRSA\.Create\s*\(\s*1024\s*\)'
+  message: "RSA-1024 is below the NIST minimum of 2048 bits and is classically broken."
+  recommendation: "Even before PQC migration, raise to RSA-3072 minimum or move to ML-KEM."
+  cwe: [326]
+  confidence: 0.99
+  examples:
+    match:
+      - 'using var rsa = RSA.Create(1024);'
+    no_match:
+      - 'using var rsa = RSA.Create(4096);'

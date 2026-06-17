@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relix-q.dev/schemas/CryptoFinding.json",
+  "title": "CryptoFinding",
+  "description": "Canonical wire shape for crypto findings emitted by Relix-Q scanners. Mirrors the Go-side finding.Finding struct at packages/go/finding/finding.go and the .NET DTO RelixQ.Contracts.CryptoFinding.",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "scan_job_id",
+    "rule_id",
+    "language",
+    "quantum_safety",
+    "severity",
+    "file_path",
+    "line_number",
+    "column",
+    "snippet",
+    "confidence",
+    "detected_at"
+  ],
+  "properties": {
+    "finding_id": { "type": "string", "format": "uuid" },
+    "scan_job_id": { "type": "string" },
+    "rule_id": { "type": "string" },
+    "language": { "type": "string" },
+    "algorithm": { "type": "string" },
+    "usage_type": { "type": "string" },
+    "quantum_safety": {
+      "type": "string",
+      "enum": ["vulnerable", "grover_weakened", "classically_broken", "hybrid", "quantum_safe", "unknown"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "low", "medium", "high", "critical"]
+    },
+    "key_size": { "type": ["integer", "null"] },
+    "file_path": { "type": "string" },
+    "line_number": { "type": "integer", "minimum": 0 },
+    "column": { "type": "integer", "minimum": 0 },
+    "snippet": { "type": "string" },
+    "snippet_context": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "category": { "type": "string" },
+    "message": { "type": "string" },
+    "recommendation": { "type": "string" },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cwe": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "git_blame_author": { "type": "string" },
+    "git_blame_commit": { "type": "string" },
+    "detected_at": { "type": "string", "format": "date-time" },
+    "delta_state": {
+      "type": "string",
+      "enum": ["new", "modified", "removed", ""],
+      "description": "PR diff mode marker; empty in full-scan output."
+    }
+  }
+}

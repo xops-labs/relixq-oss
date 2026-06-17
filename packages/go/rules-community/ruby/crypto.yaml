@@ -1,0 +1,252 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Ruby crypto rules
+# Ruby's crypto surface area is dominated by two stdlib namespaces — Digest::*
+# and OpenSSL::* — plus Rails' ActiveSupport helpers and the bcrypt gem.
+# Ruby has NO first-class PQC stdlib as of mid-2026; the recommendation column
+# points migrators at libsodium (libsodium-rb), OpenSSL 3.x with the OQS
+# provider via FFI, or a wrapped pqclean / pqcrypto build. Flag the ecosystem
+# gap loudly — Ruby crypto stacks will need vendor support before they migrate.
+#
+# The rubyast (Tree-sitter) runner accepts these query forms:
+#   call:<Receiver>.<method>   — Receiver.method(...) or receiver.method(...)
+#                                Receiver may be a scoped path ("OpenSSL::Cipher")
+#                                or a bare constant ("MD5"); short-segment
+#                                matching makes both work.
+#   new:<Const::Path>          — Const::Path.new(...) sugar for call:Path.new
+#   const:<Const::Path>        — bare constant ref NOT in call-receiver position
+#   require:<lib>              — require 'lib' / require_relative 'lib'
+#
+# Argument-value matching (e.g. discriminating Cipher.new("DES") from
+# Cipher.new("AES-256-GCM")) is intentionally NOT in the AST DSL — those rules
+# stay on the regex detector until the DSL gains literal-arg support.
+
+# ---------------------------------------------------------------------------
+# Digest stdlib — broken hashes
+# ---------------------------------------------------------------------------
+- id: RUBY_DIGEST_MD5_NEW
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: matches `Digest::MD5.new` and `MD5.new` (after `include Digest`).
+  detector:
+    type: ast
+    query: "call:Digest::MD5.new"
+  message: "Digest::MD5.new — MD5 is cryptographically broken (collisions since 2004)."
+  recommendation: "Use Digest::SHA256 / Digest::SHA3 for non-password hashing; for passwords use bcrypt/argon2 (Argon2id preferred)."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: RUBY_DIGEST_MD5_HEXDIGEST
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Digest::MD5.hexdigest"
+  message: "Digest::MD5.hexdigest(...) — MD5 is cryptographically broken."
+  recommendation: "Use Digest::SHA256.hexdigest (or SHA3) for fingerprinting; never MD5 for security."
+  cwe: [328]
+  confidence: 0.95
+- id: RUBY_DIGEST_MD5_DIGEST
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Digest::MD5.digest"
+  message: "Digest::MD5.digest(...) — MD5 is cryptographically broken."
+  recommendation: "Use Digest::SHA256.digest (or SHA3) for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.95
+- id: RUBY_DIGEST_MD2_USAGE
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: MD2
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # MD2 is rare in modern Ruby code but present in legacy OpenSSL paths. We
+  # surface it as a bare const ref because there's no first-class Digest::MD2.
+  detector:
+    type: ast
+    query: "const:OpenSSL::Digest::MD2"
+  message: "OpenSSL::Digest::MD2 referenced — MD2 is decades-broken."
+  recommendation: "Use SHA-256 or SHA-3 for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.9
+- id: RUBY_DIGEST_SHA1_NEW
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Digest::SHA1.new"
+  message: "Digest::SHA1.new — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use Digest::SHA256 / Digest::SHA3_256 for cryptographic hashing."
+  cwe: [328]
+  confidence: 0.93
+- id: RUBY_DIGEST_SHA1_HEXDIGEST
+  language: ruby
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:Digest::SHA1.hexdigest"
+  message: "Digest::SHA1.hexdigest(...) — SHA-1 is cryptographically broken."
+  recommendation: "Use Digest::SHA256.hexdigest or Digest::SHA3_256.hexdigest."
+  cwe: [328]
+  confidence: 0.93
+- id: RUBY_CONST_DIGEST_MD5
+  language: ruby
+  category: weak-hash
+  severity: medium
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # AST: bare reference to Digest::MD5 (e.g. `ALG = Digest::MD5`) — captures
+  # indirect uses that the call: rules above miss. Lower severity since we
+  # don't yet know how the class is called.
+  detector:
+    type: ast
+    query: "const:Digest::MD5"
+  message: "Digest::MD5 referenced — MD5 is cryptographically broken."
+  recommendation: "Switch to Digest::SHA256 or Digest::SHA3_256."
+  cwe: [328]
+  confidence: 0.75
+- id: RUBY_CONST_DIGEST_SHA1
+  language: ruby
+  category: weak-hash
+  severity: medium
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "const:Digest::SHA1"
+  message: "Digest::SHA1 referenced — SHA-1 is cryptographically broken."
+  recommendation: "Switch to Digest::SHA256 or Digest::SHA3_256."
+  cwe: [328]
+  confidence: 0.75
+# ---------------------------------------------------------------------------
+# OpenSSL stdlib — symmetric ciphers
+# ---------------------------------------------------------------------------
+- id: RUBY_OPENSSL_CIPHER_DES
+  language: ruby
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Regex: AST DSL can't yet discriminate `OpenSSL::Cipher.new("DES")` from
+  # `OpenSSL::Cipher.new("AES-256-GCM")`. The alternation covers single-DES,
+  # 3DES (DES-EDE3), and the Blowfish/RC4 variants commonly seen with the
+  # same constructor.
+  detector:
+    type: regex
+    pattern: 'OpenSSL::Cipher(?:::Cipher)?\.new\s*\(\s*["''](?:DES|DES-EDE|DES-EDE3|3DES|RC4|BF|BF-CBC|Blowfish)\b'
+  message: "OpenSSL::Cipher.new(\"DES|3DES|RC4|BF…\") — legacy symmetric cipher; broken or deprecated."
+  recommendation: "Use AES-256-GCM (`OpenSSL::Cipher.new('AES-256-GCM')`) or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# OpenSSL::HMAC — weak digest pairing
+# ---------------------------------------------------------------------------
+- id: RUBY_OPENSSL_HMAC_WEAK_DIGEST
+  language: ruby
+  category: weak-hash
+  severity: medium
+  algorithm: HMAC
+  usage_type: mac
+  quantum_safety: vulnerable
+  # Regex: detect HMAC pairings with MD5/SHA1. The AST DSL can match the
+  # `HMAC.digest` call site but not the `OpenSSL::Digest::MD5.new` argument
+  # — that's still a literal-arg-shaped pattern. Stay on regex.
+  detector:
+    type: regex
+    pattern: 'OpenSSL::HMAC\.(?:digest|hexdigest|new)\s*\(\s*OpenSSL::Digest::(?:MD5|SHA1)\b'
+  message: "OpenSSL::HMAC with MD5/SHA1 digest — HMAC-MD5/HMAC-SHA1 is deprecated for new designs."
+  recommendation: "Use HMAC-SHA256 or HMAC-SHA3 (`OpenSSL::Digest::SHA256.new`)."
+  cwe: [328]
+  confidence: 0.9
+- id: RUBY_REQUIRE_DIGEST
+  language: ruby
+  category: weak-hash
+  severity: info
+  algorithm: Digest
+  usage_type: dependency
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "require:digest"
+  message: "`require 'digest'` — Digest stdlib in use; review for MD5/SHA1 call sites."
+  recommendation: "Audit downstream Digest::* references; prefer SHA-256/SHA-3."
+  cwe: []
+  confidence: 0.35
+- id: RUBY_REQUIRE_DIGEST_MD5
+  language: ruby
+  category: weak-hash
+  severity: medium
+  algorithm: MD5
+  usage_type: dependency
+  quantum_safety: classically_broken
+  # `require 'digest/md5'` is a much stronger signal than the generic
+  # 'digest' — the user explicitly pulled in MD5.
+  detector:
+    type: ast
+    query: "require:digest/md5"
+  message: "`require 'digest/md5'` — explicit MD5 load; MD5 is cryptographically broken."
+  recommendation: "Switch to `require 'digest/sha2'` and use Digest::SHA256."
+  cwe: [328]
+  confidence: 0.8
+- id: RUBY_REQUIRE_DIGEST_SHA1
+  language: ruby
+  category: weak-hash
+  severity: medium
+  algorithm: SHA1
+  usage_type: dependency
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "require:digest/sha1"
+  message: "`require 'digest/sha1'` — explicit SHA-1 load; SHA-1 is cryptographically broken."
+  recommendation: "Switch to `require 'digest/sha2'` and use Digest::SHA256."
+  cwe: [328]
+  confidence: 0.8
+# ---------------------------------------------------------------------------
+# bcrypt gem — low cost factor
+# ---------------------------------------------------------------------------
+- id: RUBY_BCRYPT_LOW_COST
+  language: ruby
+  category: weak-kdf
+  severity: medium
+  algorithm: bcrypt
+  usage_type: password_hashing
+  quantum_safety: safe
+  # Regex: detect explicit `cost: <n>` where n < 12. bcrypt itself is not
+  # quantum-vulnerable, but low cost factors are independently weak. Listed
+  # so the inventory captures password-hashing health. RE2 lacks negative
+  # lookahead; the word boundary `\b` plus explicit single-digit / 10 / 11
+  # alternation avoids false positives on `cost: 120` etc.
+  detector:
+    type: regex
+    pattern: 'BCrypt::Password\.create\s*\([^)]*cost\s*:\s*(?:[0-9]|10|11)\b'
+  message: "BCrypt::Password.create(..., cost: <12) — work factor below modern recommendation."
+  recommendation: "Use cost ≥12 (Rails 7+ default) or migrate to Argon2id (argon2 gem) for new passwords."
+  cwe: [916]
+  confidence: 0.85

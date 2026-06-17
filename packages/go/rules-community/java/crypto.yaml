@@ -1,0 +1,133 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Java crypto rules
+# Java cryptography is primarily JCA/JCE: KeyPairGenerator, Cipher, MessageDigest, SecureRandom.
+#
+# The javaast (Tree-sitter) runner accepts these query forms:
+#   call:<Type>.<method>      — Type.method(...) or receiver.method(...)
+#   new:<Type>                — new Type(...) constructor calls
+#   import:<package.Class>    — import package.Class; (also matches package.*)
+#   fieldref:<Type>.<field>   — Type.field member access NOT in call position
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that need
+# to discriminate by string literal (e.g. KeyPairGenerator.getInstance("RSA")
+# vs "DSA") stay on the regex detector until the DSL gains literal-arg support.
+# Single DES vs 3DES are split so each finding carries the correct algorithm
+# and tier: single DES is classically broken (high); DESede/3DES is the
+# Grover/SWEET32 tier (medium). "DES(["/])" requires the literal to END at DES
+# or continue with a mode string, so "DESede..." never matches the DES rule.
+- id: JAVA_DES_CIPHER
+  language: java
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"DES(["/])'
+  message: "Cipher.getInstance(\"DES\") - single DES is classically broken (56-bit key) and deprecated since 2005."
+  recommendation: "Use AES-256-GCM (Cipher.getInstance(\"AES/GCM/NoPadding\")) or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'Cipher cipher = Cipher.getInstance("DES/CBC/PKCS5Padding");'
+    no_match:
+      - 'Cipher cipher = Cipher.getInstance("DESede/CBC/PKCS5Padding");'
+- id: JAVA_3DES_CIPHER
+  language: java
+  category: weak-cipher
+  severity: medium
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"(DESede|TripleDES|3DES)\b'
+  message: "Cipher.getInstance(\"DESede\") - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM (Cipher.getInstance(\"AES/GCM/NoPadding\"))."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'Cipher cipher = Cipher.getInstance("DESede/CBC/PKCS5Padding");'
+    no_match:
+      - 'Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");'
+- id: JAVA_MD5_DIGEST
+  language: java
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Mm][Dd][-]?5"'
+  message: "MessageDigest.getInstance(\"MD5\") — MD5 is cryptographically broken."
+  recommendation: "Use SHA-256 (MessageDigest.getInstance(\"SHA-256\")) or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+  examples:
+    match:
+      - 'MessageDigest md = MessageDigest.getInstance("MD5");'
+    no_match:
+      - 'MessageDigest md = MessageDigest.getInstance("SHA-256");'
+- id: JAVA_SHA1_DIGEST
+  language: java
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Ss][Hh][Aa]-?1"'
+  message: "MessageDigest.getInstance(\"SHA-1\") — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use SHA-256 or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+  examples:
+    match:
+      - 'MessageDigest md = MessageDigest.getInstance("SHA-1");'
+    no_match:
+      - 'MessageDigest md = MessageDigest.getInstance("SHA-256");'
+- id: JAVA_WEAK_PRNG
+  language: java
+  category: weak-prng
+  severity: high
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  # AST: `new Random(...)` syntactically resilient to whitespace, comments, and
+  # avoids matches inside string literals that the regex variant could hit.
+  detector:
+    type: ast
+    query: "new:Random"
+  message: "java.util.Random is a weak PRNG and must not be used for security-sensitive values."
+  recommendation: "Use java.security.SecureRandom for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.85
+- id: JAVA_INSECURE_RANDOM_IMPORT
+  language: java
+  category: weak-prng
+  severity: medium
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  # AST: surfaces `import java.util.Random;` as a low-confidence signal that
+  # complements the constructor-level rule above. The two together survive
+  # aliasing tricks like `import java.util.Random;` followed by an unqualified
+  # `new Random()`.
+  detector:
+    type: ast
+    query: "import:java.util.Random"
+  message: "import java.util.Random — Random is a weak PRNG and must not be used for security-sensitive values."
+  recommendation: "Import java.security.SecureRandom instead for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.6

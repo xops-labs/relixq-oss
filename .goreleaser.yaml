@@ -1,0 +1,131 @@
+# GoReleaser v2 config for Relix-Q Community releases.
+#
+# Driven by .github/workflows/release.yml on every `v*` tag. Builds the two
+# CLI binaries (relixq + relixq-scan-code) for Windows/Linux/macOS, bundles
+# them with the community rule pack into per-platform archives, produces
+# deb/rpm packages and SHA256 checksums, and uploads everything to the GitHub
+# Release. The Windows MSI is built separately (packaging/windows/) because it
+# needs a Windows runner; the Docker image is built by the same workflow from
+# Dockerfile.scanner.
+#
+# Local dry run (no publish):  goreleaser release --snapshot --clean
+version: 2
+
+project_name: relixq
+
+builds:
+  - id: relixq
+    dir: packages/go
+    main: ./cmd/relixq
+    binary: relixq
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/relix-q/relix-q/cmd/relixq/cmd.Version={{ .Version }}
+      - -X github.com/relix-q/relix-q/cmd/relixq/cmd.Commit={{ .ShortCommit }}
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: relixq-scan-code
+    dir: packages/go
+    main: ./cmd/relixq-scan-code
+    binary: relixq-scan-code
+    env:
+      - CGO_ENABLED=0 # regex floor + pure-Go AST (Go/JS/TS/PHP); CGO AST tiers stay Docker-only
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: dist
+    ids: [relixq, relixq-scan-code]
+    name_template: "relixq_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - src: packages/go/rules-community/**
+        dst: rules
+      # `relixq` finds relixq-scan-code next to itself and the rules/ folder
+      # automatically (internal/scanner: ResolveScannerBin / BundledRuleDir),
+      # so an extracted archive works with zero configuration.
+
+checksum:
+  name_template: "relixq_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+nfpms:
+  - id: linux-packages
+    package_name: relixq
+    ids: [relixq, relixq-scan-code]
+    formats: [deb, rpm]
+    vendor: Relix-Q
+    homepage: https://github.com/xops-labs/relixq-oss
+    maintainer: Yasvanth Udayakumar <yasvanth@live.in>
+    description: |-
+      Relix-Q Community — post-quantum cryptography risk scanner.
+      Scans source code, dependencies, and TLS endpoints for
+      quantum-vulnerable cryptography and emits SARIF for CI.
+    license: Apache-2.0
+    bindir: /usr/bin
+    contents:
+      # Bundled community rules; the CLI resolves ../share/relixq/rules
+      # relative to /usr/bin/relixq when no rule dir is configured.
+      - src: packages/go/rules-community
+        dst: /usr/share/relixq/rules
+        type: tree
+      - src: LICENSE
+        dst: /usr/share/doc/relixq/LICENSE
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^chore"
+      - "^ci"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  name_template: "Relix-Q Community {{ .Tag }}"
+  footer: |
+    ---
+    **Evaluate in under five minutes** — download the archive for your
+    platform, extract it, and run:
+
+    ```
+    relixq scan /path/to/repo
+    ```
+
+    Verify downloads against `relixq_{{ .Version }}_checksums.txt`
+    (SHA256). The Windows `.msi` installer carries a sidecar `.sha256`
+    file. Install instructions: see the
+    [README](https://github.com/xops-labs/relixq-oss#readme) and
+    [docs/RELEASE.md](https://github.com/xops-labs/relixq-oss/blob/main/docs/RELEASE.md).

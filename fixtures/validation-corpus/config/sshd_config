@@ -1,0 +1,12 @@
+# Host keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+# Key exchange
+KexAlgorithms ecdh-sha2-nistp256,diffie-hellman-group14-sha256
+
+# Symmetric ciphers
+Ciphers aes128-ctr,aes256-gcm@openssh.com
+
+PermitRootLogin no
+PasswordAuthentication no

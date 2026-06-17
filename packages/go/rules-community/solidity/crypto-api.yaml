@@ -1,0 +1,200 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: SOLIDITY_ECRECOVER
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\becrecover\\s*\\("
+  message: "ecrecover(...) — secp256k1 ECDSA signature recovery; quantum-vulnerable (Shor)."
+  cwe: [327]
+  confidence: 0.95
+
+- id: SOLIDITY_KECCAK256_GENERIC
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Keccak256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "\\bkeccak256\\s*\\("
+  message: "keccak256(...) — Grover halves effective preimage security from 256 to 128 bits; inventory hash usage."
+  confidence: 0.35
+
+- id: SOLIDITY_SHA256_GLOBAL
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "\\bsha256\\s*\\("
+  message: "sha256(...) — precompile 0x02; Grover halves effective preimage security."
+  confidence: 0.55
+
+- id: SOLIDITY_ADDMOD_MULMOD
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "ModularArithmetic"
+  usage_type: "math"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\b(?:addmod|mulmod)\\s*\\("
+  message: "addmod/mulmod used — likely BN254 / BLS12-381 pairing or scalar-field math; review for PQC alternatives."
+  confidence: 0.4
+
+- id: SOLIDITY_IMPORT_OPENZEPPELIN_ECDSA
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "import\\s+(?:[^;]*\\s+from\\s+)?[\"'][^\"']*@openzeppelin/contracts/(?:utils/)?cryptography/ECDSA\\.sol[\"']"
+  message: "Imports @openzeppelin/contracts/.../cryptography/ECDSA.sol — secp256k1 ECDSA helpers; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.9
+
+- id: SOLIDITY_IMPORT_OPENZEPPELIN_EIP712
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "ECDSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "import\\s+(?:[^;]*\\s+from\\s+)?[\"'][^\"']*@openzeppelin/contracts/(?:utils/)?cryptography/EIP712\\.sol[\"']"
+  message: "Imports OpenZeppelin EIP712.sol — typed-data signing over secp256k1 ECDSA."
+  cwe: [327]
+  confidence: 0.8
+
+- id: SOLIDITY_ECDSA_RECOVER
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bECDSA\\.recover\\s*\\("
+  message: "ECDSA.recover(...) — OpenZeppelin secp256k1 signature recovery; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.95
+
+- id: SOLIDITY_PRECOMPILE_ECRECOVER
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*[^,]+,\\s*(?:0x0*1\\b|1\\b)\\s*,"
+  message: "Inline-assembly staticcall to precompile 0x01 — direct ecrecover invocation; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.88
+
+- id: SOLIDITY_PRECOMPILE_SHA256
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "SHA256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*[^,]+,\\s*(?:0x0*2\\b|2\\b)\\s*,"
+  message: "Inline-assembly staticcall to precompile 0x02 — direct sha256 invocation."
+  confidence: 0.55
+
+- id: SOLIDITY_PRECOMPILE_MODEXP
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "ModExp"
+  usage_type: "math"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "staticcall\\s*\\(\\s*[^,]+,\\s*(?:0x0*5\\b|5\\b)\\s*,"
+  message: "Inline-assembly staticcall to precompile 0x05 (modexp) — RSA / discrete-log primitive; quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.85
+
+- id: SOLIDITY_ASSEMBLY_ECRECOVER_OPCODE
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: ":=\\s*ecrecover\\b"
+  message: "Yul `:= ecrecover` — assembly-resident signature recovery, bypasses high-level safety wrappers."
+  cwe: [327]
+  confidence: 0.9
+
+- id: SOLIDITY_ASSEMBLY_KECCAK256_OPCODE
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Keccak256"
+  usage_type: "hashing"
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: ":=\\s*keccak256\\s*\\("
+  message: "Yul `:= keccak256(...)` — assembly-resident two-arg opcode call."
+  confidence: 0.55
+
+- id: SOLIDITY_PRAGMA_OUTDATED
+  language: solidity
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "SolidityCompiler"
+  usage_type: "language_version"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "pragma\\s+solidity\\s+[\\^~>=<\\s]*0\\.(?:[0-7])\\b"
+  message: "pragma solidity targets a pre-0.8 compiler — wraparound arithmetic by default and weaker ecrecover semantics."
+  cwe: [682]
+  confidence: 0.85

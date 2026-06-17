@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: ERLANG_PUBLIC_KEY_RSA_2048
+  language: erlang
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: "public_key:generate_key\\s*\\(\\s*\\{\\s*rsa\\s*,\\s*2048\\b"
+  message: "public_key:generate_key({rsa, 2048, _}) — meets classical guidance but is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.85
+
+- id: ERLANG_LEGACY_CRYPTO_MODULE
+  language: erlang
+  category: crypto-api
+  layer: detection
+  severity: low
+  algorithm: "any"
+  usage_type: "module_declaration"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "-module\\s*\\(\\s*(?:legacy_crypto|old_aes|des_compat|md5_session)\\b"
+  message: "-module/1 declares a legacy-crypto-named module — typical wrapper around deprecated primitives."
+  confidence: 0.6

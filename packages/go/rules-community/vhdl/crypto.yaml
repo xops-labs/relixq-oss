@@ -1,0 +1,220 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# VHDL HDL crypto rules
+#
+# VHDL (VHSIC Hardware Description Language) is the European / aerospace /
+# DoD silicon workhorse. Heritage and standardisation:
+#   - ESA / CNES / DLR space programs mandate VHDL for ASIC + FPGA flows
+#     (DO-254 airborne hardware, ECSS-Q-ST-60-02 ESA radiation-hard parts).
+#   - UK MoD DEF STAN 00-55, FACE consortium boards, NATO STANAGs default
+#     to VHDL over Verilog for high-assurance silicon.
+#   - The major synthesis vendors (Synopsys, Cadence, Mentor / Siemens EDA,
+#     Xilinx / AMD Vivado, Altera / Intel Quartus) all accept VHDL on the
+#     same flow as Verilog — so PQC-vulnerable IP cores show up in VHDL
+#     just as often in EU/UK/DoD repos.
+#
+# VHDL's crypto landscape mirrors Verilog but with verbose, declarative
+# syntax instead of C-flavored statements:
+#   - `entity <name> is ... end entity;` declares an IP block (vs Verilog's
+#     `module`). Names like `rsa_core`, `ecdsa_signer`, `sha1_engine` are
+#     the same vocabulary that ships in OpenCores / GitHub IP libraries.
+#   - `architecture <name> of <entity> is ... begin ... end architecture;`
+#     supplies the body (RTL or behavioural).
+#   - Hardcoded crypto constants are declared as `constant SHA1_H0 :
+#     std_logic_vector(31 downto 0) := x"67452301";`. The hex literal form
+#     is `x"..."` (versus Verilog's `32'h67452301`).
+#   - Port declarations expose the crypto contract: `modulus : in
+#     std_logic_vector(2047 downto 0); private_key : in std_logic_vector
+#     (...);`. Surfacing these by name + direction gives strong evidence
+#     for inventory.
+#   - VHDL is case-INSENSITIVE for identifiers and keywords, so every
+#     regex below uses `flags: i`. (Hex literal characters inside `x"..."`
+#     are still case-insensitive by the LRM, hence the explicit `[0-9a-fA-F]`.)
+#
+# Strategy: **regex-only**. The smacker tree-sitter module pinned in
+# `go.mod` has no VHDL subpackage (subpackages are ast/cppast/csharpast/
+# goast/javaast/jstsast/juliaast/kotlinast/phpast/pyast/regex/rubyast/
+# rustast/scalaast/swiftast). Regex
+# is the acceptable fallback when smacker lacks the grammar; we do not
+# vendor a VHDL tree-sitter grammar (same policy applied to Ada, Verilog,
+# Solidity, PHP-ast).
+#
+# All rule IDs are prefixed `VHDL_`.
+
+# ---------------------------------------------------------------------------
+# Quantum-vulnerable asymmetric IP entities (RSA / ECDSA / ECC)
+# ---------------------------------------------------------------------------
+- id: VHDL_ENTITY_SHA1
+  language: vhdl
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `entity sha1_engine is ...` / `entity sha1_core is ...` — SHA-1 IP. The
+  # `_\w+` tail allows for vendor-naming variation (sha1_top, sha1_pipelined,
+  # etc.) while keeping the prefix anchored.
+  detector:
+    type: regex
+    pattern: '\bentity\s+sha1_\w+\b'
+    flags: i
+  message: "VHDL entity sha1_<name> — SHA-1 IP block (broken since SHAttered, 2017)."
+  recommendation: "Replace with SHA-256 / SHA-3 / SHA-384 IP. For long-term PQC posture pair with SHAKE-based KDFs already used in ML-KEM / ML-DSA."
+  cwe: [328]
+  confidence: 0.9
+- id: VHDL_ENTITY_MD5
+  language: vhdl
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `entity md5_core is ...` / `entity md5_engine is ...` — MD5 IP. MD5
+  # collisions have been practical since 2004; finding a silicon MD5 core
+  # in 2026 is a strong supply-chain inventory signal.
+  detector:
+    type: regex
+    pattern: '\bentity\s+md5_\w+\b'
+    flags: i
+  message: "VHDL entity md5_<name> — MD5 IP block (cryptographically broken since 2004)."
+  recommendation: "Remove MD5 hardware paths. Use SHA-256 or SHA-3 silicon IP instead."
+  cwe: [327, 328]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Broken-symmetric IP entities (DES / 3DES / RC4)
+# ---------------------------------------------------------------------------
+- id: VHDL_ENTITY_DES
+  language: vhdl
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # `entity des_core is ...` / `entity des_encrypt is ...` /
+  # `entity des_decrypt is ...`. 56-bit DES is brute-forceable on modern
+  # silicon, NIST withdrew it (SP 800-67 Rev2).
+  detector:
+    type: regex
+    pattern: '\bentity\s+des_(?:core|encrypt|decrypt)\b'
+    flags: i
+  message: "VHDL entity des_core / des_encrypt / des_decrypt — DES IP block (NIST-withdrawn, 56-bit key)."
+  recommendation: "Replace with AES-256-GCM or ChaCha20-Poly1305 IP. Note: AES still classifies as Grover-affected; doubling key length (AES-256) is the post-quantum mitigation."
+  cwe: [327]
+  confidence: 0.92
+- id: VHDL_ENTITY_3DES
+  language: vhdl
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  # `entity tdes_core is ...` / `entity tdes_encrypt is ...` / similar.
+  # NOTE: a VHDL identifier cannot legally start with a digit — `3des_...`
+  # would be syntactically illegal. We anchor instead on the synonymous
+  # `tdes_` and `triple_des_` forms that legal VHDL source uses.
+  detector:
+    type: regex
+    pattern: '\bentity\s+(?:tdes|triple_des)_\w+\b'
+    flags: i
+  message: "VHDL entity tdes_ / triple_des_ — 3DES IP block (NIST disallowed after 2023, SP 800-131A Rev2)."
+  recommendation: "Replace with AES-256-GCM IP. 3DES has been disallowed for encryption since 2024 per NIST SP 800-131A Rev2."
+  cwe: [327]
+  confidence: 0.92
+- id: VHDL_ENTITY_RC4
+  language: vhdl
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # `entity rc4_<name> is ...` — RC4 stream cipher IP. RFC 7465 prohibits
+  # RC4 in TLS; ditto IPsec. Silicon RC4 cores are pure legacy.
+  detector:
+    type: regex
+    pattern: '\bentity\s+rc4_\w+\b'
+    flags: i
+  message: "VHDL entity rc4_<name> — RC4 stream cipher IP block (RFC 7465 prohibits RC4)."
+  recommendation: "Remove RC4 silicon paths. Use AES-256-GCM or ChaCha20-Poly1305 IP."
+  cwe: [327]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Hardcoded crypto constants (SHA-1 H0, MD5 A, RSA modulus/exponent)
+# ---------------------------------------------------------------------------
+- id: VHDL_CONSTANT_SHA1_H0
+  language: vhdl
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # SHA-1 initial hash word H0 = 0x67452301. VHDL declaration form:
+  # `constant SHA1_H0 : std_logic_vector(31 downto 0) := x"67452301";`.
+  # `\S+` matches the type specification (e.g. `std_logic_vector(31 downto
+  # 0)`) without trying to parse VHDL constrained-subtype syntax.
+  detector:
+    type: regex
+    pattern: 'constant\s+SHA1_H0\s*:[^:=]+?:=\s*x"67452301"'
+    flags: i
+  message: "VHDL constant SHA1_H0 := x\"67452301\" — SHA-1 initial hash constant declared at the RTL level."
+  recommendation: "Remove the SHA-1 IP block. Use SHA-256 / SHA-3 silicon (the SHA-256 H0 = 0x6A09E667 is the equivalent constant in a stronger family)."
+  cwe: [328]
+  confidence: 0.95
+- id: VHDL_CONSTANT_MD5_A
+  language: vhdl
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # MD5 initial state A = 0x67452301 (same numeric value as SHA-1 H0; the
+  # MD5_A identifier disambiguates intent). Co-locating both rules lets
+  # the inventory dashboard show side-by-side counts.
+  detector:
+    type: regex
+    pattern: 'constant\s+MD5_A\s*:[^:=]+?:=\s*x"67452301"'
+    flags: i
+  message: "VHDL constant MD5_A := x\"67452301\" — MD5 initial state constant declared at the RTL level."
+  recommendation: "Remove the MD5 IP block. Use SHA-256 or SHA-3 silicon instead."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: VHDL_CONSTANT_HARDCODED_MODULUS
+  language: vhdl
+  category: hardcoded-key
+  severity: critical
+  algorithm: RSA
+  usage_type: key_material
+  quantum_safety: vulnerable
+  # `constant RSA_MODULUS : std_logic_vector(...) := x"<hex>";` or any
+  # identifier containing MODULUS. Hardcoded moduli in silicon are a
+  # supply-chain red flag: either the IP ships with a vendor test key, or
+  # the design hard-codes a customer key during synthesis. Both are bad.
+  detector:
+    type: regex
+    pattern: 'constant\s+\w*MODULUS\w*\s*:[^:=]+?:=\s*x"[0-9a-fA-F]+"'
+    flags: i
+  message: "VHDL constant <name>MODULUS<...> := x\"...\" — hardcoded RSA modulus baked into RTL."
+  recommendation: "Hardcoded moduli in silicon make key rotation impossible without re-tape-out. Move the modulus to an OTP / eFuse region with a documented provisioning flow; long-term, retire RSA in favour of ML-KEM."
+  cwe: [798, 321]
+  confidence: 0.85
+- id: VHDL_CONSTANT_RSA_SMALL_EXPONENT
+  language: vhdl
+  category: weak-key-size
+  severity: high
+  algorithm: RSA
+  usage_type: key_material
+  quantum_safety: vulnerable
+  # Small fixed RSA public exponents: 3, 5, 17, 65537. The first three are
+  # textbook-RSA-attack flags; 65537 (0x10001) is conventional and not a
+  # bug per se but is surfaced for inventory so reviewers can see what the
+  # silicon is parameterised with. Hex literals at typical bit widths
+  # (32 / 64 / 2048) are all `x"00000003"` / `x"00000005"` / `x"00000011"` /
+  # `x"00010001"` — the canonical narrow form.
+  detector:
+    type: regex
+    pattern: 'constant\s+\w*EXPONENT\w*\s*:[^:=]+?:=\s*(?:x"00000003"|x"00000005"|x"00000011"|x"00010001")'
+    flags: i
+  message: "VHDL constant <name>EXPONENT<...> := small fixed RSA exponent — hardcoded e in {3, 5, 17, 65537}."
+  recommendation: "Public exponents e ∈ {3, 5, 17} enable Coppersmith / Hastad attacks against textbook RSA. e=65537 is conventional but flagged for inventory. Long-term, migrate the IP block to ML-KEM / ML-DSA."
+  cwe: [780, 327]
+  confidence: 0.8

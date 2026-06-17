@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: ELIXIR_PUBLIC_KEY_RSA_2048
+  language: elixir
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: ":public_key\\.generate_key\\s*\\(\\s*\\{\\s*:rsa\\s*,\\s*2048\\b"
+  message: ":public_key.generate_key({:rsa, 2048, _}) — meets classical guidance but is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.85
+
+- id: ELIXIR_COMEONIN_LEGACY_NAMESPACE
+  language: elixir
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "bcrypt"
+  usage_type: "password_hashing"
+  quantum_safety: safe
+  detector:
+    type: regex
+    pattern: "Comeonin\\.Bcrypt\\.\\w+\\b"
+  message: "Comeonin.Bcrypt.* — legacy Comeonin v4 namespace; v5+ split hashing into separate packages."
+  confidence: 0.6

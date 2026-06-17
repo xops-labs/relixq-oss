@@ -1,0 +1,80 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# C/C++ crypto rules
+# Targets OpenSSL's legacy C API (libssl/libcrypto), which is the dominant
+# cryptography library in C/C++ codebases.
+#
+# AST rules are matched by the cppast runner (Tree-sitter via CGO). Multi-API
+# rules that need an alternation (DES, RC4) stay as regex because the AST
+# query DSL does not support an OR over function names — splitting into 6+
+# single-call AST rules would explode the rule pack.
+#
+# `language: cpp` rules apply to `.cpp / .cc / .cxx / .hpp / .hxx` files.
+# The mirror set with `language: c` lives in `rules/c/crypto.yaml`.
+
+# --- RSA key generation -----------------------------------------------------
+# OpenSSL exposes two entry points; we list each as its own AST rule with a
+# shared message and severity.
+- id: CPP_OPENSSL_EVP_MD5
+  language: cpp
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:EVP_md5"
+  message: "EVP_md5() — MD5 is cryptographically broken."
+  recommendation: "Use EVP_sha256() or EVP_sha3_256()."
+  cwe: [328]
+  confidence: 0.97
+- id: CPP_OPENSSL_EVP_SHA1
+  language: cpp
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:EVP_sha1"
+  message: "EVP_sha1() — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use EVP_sha256() or EVP_sha3_256()."
+  cwe: [328]
+  confidence: 0.97
+# --- DES / 3DES -------------------------------------------------------------
+# Stays regex: the alternation across DES_ecb_encrypt, DES_cbc_encrypt,
+# EVP_des_cbc, EVP_des_ecb, EVP_des_cfb, EVP_des_ofb, EVP_des_ede / ede3 is
+# too wide to enumerate as one-AST-rule-per-symbol without bloating the pack.
+- id: CPP_OPENSSL_DES
+  language: cpp
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(?:DES_ecb_encrypt|DES_cbc_encrypt|EVP_des_(?:cbc|ecb|cfb|ofb)|EVP_des_ede3?)\s*\('
+  message: "OpenSSL DES/3DES API — DES/3DES is broken and deprecated since 2017."
+  recommendation: "Use EVP_aes_256_gcm() or EVP_chacha20_poly1305()."
+  cwe: [327]
+  confidence: 0.95
+# --- RC4 --------------------------------------------------------------------
+# Stays regex for the same reason as DES (multi-symbol alternation).
+- id: CPP_OPENSSL_RC4
+  language: cpp
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(?:RC4_set_key|RC4\s*\(|EVP_rc4\s*\(\s*\))'
+  message: "OpenSSL RC4 API — RC4 is broken and must not be used."
+  recommendation: "Use EVP_chacha20_poly1305() or EVP_aes_256_gcm()."
+  cwe: [327]
+  confidence: 0.95

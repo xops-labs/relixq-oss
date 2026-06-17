@@ -1,0 +1,161 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: PHP_OPENSSL_PKEY_NEW
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bopenssl_pkey_new\\s*\\("
+  message: "openssl_pkey_new() — generates RSA/DSA/EC keys (configured via OPENSSL_KEYTYPE_*); all classical asymmetric algorithms are quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_OPENSSL_KEYTYPE_RSA
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOPENSSL_KEYTYPE_RSA\\b"
+  message: "OPENSSL_KEYTYPE_RSA — RSA is quantum-vulnerable (Shor's algorithm)."
+  cwe: [327]
+
+- id: PHP_OPENSSL_KEYTYPE_DSA
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOPENSSL_KEYTYPE_DSA\\b"
+  message: "OPENSSL_KEYTYPE_DSA — DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_OPENSSL_KEYTYPE_EC
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bOPENSSL_KEYTYPE_EC\\b"
+  message: "OPENSSL_KEYTYPE_EC — classical ECC (ECDSA/ECDH) is quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_PHPSECLIB_RSA_NEW
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bnew\\s+RSA\\b"
+  message: "new RSA() — RSA is quantum-vulnerable (likely phpseclib RSA construction)."
+  cwe: [327]
+
+- id: PHP_PHPSECLIB_DSA_NEW
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bnew\\s+DSA\\b"
+  message: "new DSA() — DSA is deprecated and quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_PHPSECLIB_USE_RSA
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\buse\\s+phpseclib3\\\\Crypt\\\\RSA\\b"
+  message: "use phpseclib3\\Crypt\\RSA — RSA usage will be quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_PHPSECLIB_USE_DSA
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "DSA"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\buse\\s+phpseclib3\\\\Crypt\\\\DSA\\b"
+  message: "use phpseclib3\\Crypt\\DSA — DSA is deprecated and quantum-vulnerable."
+  cwe: [327]
+
+- id: PHP_PHPSECLIB_USE_AES_INFO
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "AES"
+  usage_type: "import"
+  quantum_safety: safe
+  detector:
+    type: regex
+    pattern: "\\buse\\s+phpseclib3\\\\Crypt\\\\AES\\b"
+  message: "use phpseclib3\\Crypt\\AES — informational; verify the mode used (ECB and weak modes still risky)."
+
+- id: PHP_PHPSECLIB_USE_ANY_INFO
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "phpseclib"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\buse\\s+phpseclib3\\\\Crypt\\\\"
+  message: "use phpseclib3\\Crypt\\... — phpseclib in use; verify which algorithms."
+
+- id: PHP_SODIUM_AVAILABLE_INFO
+  language: php
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "sodium"
+  usage_type: "import"
+  quantum_safety: safe
+  detector:
+    type: regex
+    pattern: "\\bsodium_crypto_box_keypair\\s*\\("
+  message: "sodium_crypto_box_keypair() — uses X25519 (classical ECC, quantum-vulnerable)."

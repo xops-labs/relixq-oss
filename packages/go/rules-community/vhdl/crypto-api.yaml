@@ -1,0 +1,121 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: VHDL_ENTITY_RSA_CORE
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bentity\\s+rsa_(?:core|accelerator|engine)\\b"
+    flags: "i"
+  message: "VHDL entity rsa_core / rsa_accelerator / rsa_engine — quantum-vulnerable RSA IP block."
+  cwe: [327]
+  confidence: 0.92
+
+- id: VHDL_ENTITY_ECDSA
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bentity\\s+ecdsa_(?:signer|verifier|core)\\b"
+    flags: "i"
+  message: "VHDL entity ecdsa_signer / ecdsa_verifier / ecdsa_core — quantum-vulnerable ECDSA IP block."
+  cwe: [327]
+  confidence: 0.92
+
+- id: VHDL_ENTITY_ECC_CURVE
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECC"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bentity\\s+ecc_(?:p256|p384|curve)\\b"
+    flags: "i"
+  message: "VHDL entity ecc_p256 / ecc_p384 / ecc_curve — quantum-vulnerable ECC IP block."
+  cwe: [327]
+  confidence: 0.9
+
+- id: VHDL_CONSTANT_AES_SBOX
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "AES"
+  usage_type: "encryption"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "constant\\s+\\w*SBOX\\w*\\s*:"
+    flags: "i"
+  message: "VHDL constant <name>SBOX<...> : ... — AES S-box ROM declared in RTL."
+  confidence: 0.6
+
+- id: VHDL_PORT_PRIVATE_KEY
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_material"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\b(?:modulus|exponent|private_key|d_param)\\s*:\\s*in\\s+std_logic_vector\\b"
+    flags: "i"
+  message: "VHDL port (modulus | exponent | private_key | d_param) : in std_logic_vector — RSA-style parameter port on an IP entity."
+  cwe: [321, 327]
+  confidence: 0.85
+
+- id: VHDL_PORT_LEGACY_CRYPTO_OUTPUT
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "Legacy"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\b(?:signature|cipher_text)\\s*:\\s*out\\s+std_logic_vector\\b"
+    flags: "i"
+  message: "VHDL port (signature | cipher_text) : out std_logic_vector — legacy crypto output emitted by an IP entity."
+  cwe: [327]
+  confidence: 0.7
+
+- id: VHDL_LIBRARY_DEPRECATED
+  language: vhdl
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "Legacy"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\blibrary\\s+(?:legacy_crypto|old_aes|deprecated_crypto)\\b"
+    flags: "i"
+  message: "VHDL library legacy_crypto / old_aes / deprecated_crypto — explicit use of a deprecated crypto IP library."
+  cwe: [1104, 327]
+  confidence: 0.85

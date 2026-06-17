@@ -1,0 +1,232 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: GO_RSA_GENERATE_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa\\.GenerateKey\\s*\\("
+  message: "crypto/rsa.GenerateKey — RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'key, err := rsa.GenerateKey(rand.Reader, 2048)'
+    no_match:
+      - 'key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)'
+
+- id: GO_RSA_GENERATE_MULTI_PRIME_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa\\.GenerateMultiPrimeKey\\s*\\("
+  message: "crypto/rsa.GenerateMultiPrimeKey — RSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) and key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'key, err := rsa.GenerateMultiPrimeKey(rand.Reader, 3, 2048)'
+    no_match:
+      - 'key, err := rsa.GenerateKey(rand.Reader, 2048)'
+
+- id: GO_ECDSA_GENERATE_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\becdsa\\.GenerateKey\\s*\\("
+  message: "crypto/ecdsa.GenerateKey — ECDSA is quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  examples:
+    match:
+      - 'key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)'
+    no_match:
+      - 'key, err := rsa.GenerateKey(rand.Reader, 2048)'
+
+- id: GO_ECDH_GENERATE_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\becdh\\.GenerateKey\\s*\\("
+  message: "crypto/ecdh.GenerateKey — classical ECDH is quantum-vulnerable."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  examples:
+    match:
+      - 'priv, err := ecdh.GenerateKey(rand.Reader)'
+    no_match:
+      - 'priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)'
+
+- id: GO_DSA_GENERATE_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "DSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bdsa\\.GenerateKey\\s*\\("
+  message: "crypto/dsa.GenerateKey — DSA is deprecated (NIST SP 800-131A) and quantum-vulnerable."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  examples:
+    match:
+      - 'err := dsa.GenerateKey(&priv, rand.Reader)'
+    no_match:
+      - 'key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)'
+
+- id: GO_ED25519_GENERATE_KEY
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "Ed25519"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bed25519\.GenerateKey\s*\('
+  message: "crypto/ed25519.GenerateKey - EdDSA is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate signatures to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'pub, priv, err := ed25519.GenerateKey(rand.Reader)'
+    no_match:
+      - 'sig := ed25519.Sign(priv, message)'
+
+- id: GO_ECDH_CURVE
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\becdh\.(P256|P384|P521|X25519)\s*\(\s*\)'
+  message: "crypto/ecdh curve selection - classical elliptic-curve Diffie-Hellman is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'curve := ecdh.P256()'
+    no_match:
+      - 'curve := elliptic.P256()'
+
+- id: GO_CURVE25519_SCALARMULT
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDH"
+  usage_type: "key_exchange"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\bcurve25519\.(X25519|ScalarBaseMult|ScalarMult)\b'
+  message: "x/crypto/curve25519 scalar multiplication - classical X25519 key agreement is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Migrate key establishment to ML-KEM (FIPS 203) or hybrid X25519MLKEM768."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'shared, err := curve25519.X25519(priv, pub)'
+    no_match:
+      - 'curve := ecdh.X25519()'
+
+- id: GO_TLS_CLASSICAL_CIPHER_SUITE
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "TLS"
+  usage_type: "tls_config"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '\btls\.TLS_(ECDHE|RSA)_[A-Z0-9_]+'
+  message: "tls.Config pins a TLS 1.2 cipher-suite constant with classical key exchange (ECDHE/RSA) - quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Move to TLS 1.3 and enable hybrid X25519MLKEM768 key exchange (Go 1.23+ CurvePreferences)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'suites := []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}'
+    no_match:
+      - 'suites := []uint16{tls.TLS_AES_128_GCM_SHA256}'
+
+- id: GO_WEAK_RSA_ENCRYPT
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "encryption_at_rest"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa\\.EncryptPKCS1v15\\s*\\("
+  message: "rsa.EncryptPKCS1v15 — PKCS#1 v1.5 RSA encryption is vulnerable to padding oracles."
+  cwe: [326, 327]
+  examples:
+    match:
+      - 'ct, err := rsa.EncryptPKCS1v15(rand.Reader, pub, msg)'
+    no_match:
+      - 'ct, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pub, msg, nil)'
+
+- id: GO_WEAK_RSA_SIGN
+  language: go
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "signing"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\brsa\\.SignPKCS1v15\\s*\\("
+  message: "rsa.SignPKCS1v15 — PKCS#1 v1.5 RSA signing; prefer RSA-PSS as interim, then ML-DSA."
+  cwe: [327]
+  examples:
+    match:
+      - 'sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, digest)'
+    no_match:
+      - 'sig, err := rsa.SignPSS(rand.Reader, priv, crypto.SHA256, digest, nil)'

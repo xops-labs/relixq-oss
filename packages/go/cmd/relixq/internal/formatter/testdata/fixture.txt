@@ -1,0 +1,27 @@
+relixq scan: 5 finding(s) (1 critical, 1 high, 1 medium, 1 low, 1 info)
+
+CRITICAL   GO_RSA_GENERATE_KEY
+  services/auth/keys.go:42
+  > rsa.GenerateKey(rand.Reader, 2048)
+  crypto/rsa.GenerateKey produces a quantum-vulnerable key pair.
+  Recommendation: Migrate to ML-KEM (FIPS 203) or a hybrid X25519+ML-KEM construction.
+
+HIGH       PY_AES_ECB_MODE
+  apps/web/crypto/legacy.py:113
+  > Cipher(algorithms.AES(key), modes.ECB())
+  AES in ECB mode leaks plaintext structure and is not IND-CPA secure.
+  Recommendation: Use AES-GCM with a 256-bit key, and plan for ML-KEM-derived keys.
+
+MEDIUM     CSHARP_SHA1_CREATE
+  services/billing/Hashing.cs:27
+  > SHA1.Create()
+  SHA-1 is broken against collision attacks; quantum reduces its effective security further.
+
+LOW        JAVA_ECDSA_P256_SIGN
+  services/identity/src/main/java/com/relixq/Signer.java:88
+  ECDSA over P-256 is vulnerable to Shor's algorithm on a CRQC.
+
+INFO       RUST_MLKEM_KEYGEN
+  workers/pqc-bridge/src/kem.rs:14
+  ML-KEM-768 keypair generation; recorded for inventory.
+

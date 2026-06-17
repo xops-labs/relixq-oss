@@ -1,0 +1,73 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# C crypto rules
+# Mirror of rules/cpp/crypto.yaml with `language: c` so the same OpenSSL APIs
+# are detected in `.c` and `.h` files. Routed through the same cppast runner
+# (Tree-sitter via CGO). The runner selects the C grammar for `.c / .h` and
+# the C++ grammar for everything else; one rule pack would suffice in
+# principle but the scanner indexes rules by exact `language:` field, so we
+# duplicate the schema here.
+#
+# When editing OpenSSL detection rules, keep this file in sync with
+# rules/cpp/crypto.yaml.
+
+# --- RSA key generation -----------------------------------------------------
+- id: C_OPENSSL_EVP_MD5
+  language: c
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:EVP_md5"
+  message: "EVP_md5() — MD5 is cryptographically broken."
+  recommendation: "Use EVP_sha256() or EVP_sha3_256()."
+  cwe: [328]
+  confidence: 0.97
+- id: C_OPENSSL_EVP_SHA1
+  language: c
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:EVP_sha1"
+  message: "EVP_sha1() — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use EVP_sha256() or EVP_sha3_256()."
+  cwe: [328]
+  confidence: 0.97
+# --- DES / 3DES (regex; multi-symbol alternation) ---------------------------
+- id: C_OPENSSL_DES
+  language: c
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(?:DES_ecb_encrypt|DES_cbc_encrypt|EVP_des_(?:cbc|ecb|cfb|ofb)|EVP_des_ede3?)\s*\('
+  message: "OpenSSL DES/3DES API — DES/3DES is broken and deprecated since 2017."
+  recommendation: "Use EVP_aes_256_gcm() or EVP_chacha20_poly1305()."
+  cwe: [327]
+  confidence: 0.95
+# --- RC4 (regex; multi-symbol alternation) ----------------------------------
+- id: C_OPENSSL_RC4
+  language: c
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\b(?:RC4_set_key|RC4\s*\(|EVP_rc4\s*\(\s*\))'
+  message: "OpenSSL RC4 API — RC4 is broken and must not be used."
+  recommendation: "Use EVP_chacha20_poly1305() or EVP_aes_256_gcm()."
+  cwe: [327]
+  confidence: 0.95

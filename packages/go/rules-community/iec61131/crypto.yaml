@@ -1,0 +1,311 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# IEC 61131-3 Structured Text crypto rules
+#
+# IEC 61131-3 ST is the dominant programming language for industrial control
+# systems — Siemens SIMATIC TIA Portal (SCL dialect), Rockwell Studio 5000
+# Logix Designer, CODESYS-based PLCs (Beckhoff TwinCAT, WAGO, Schneider,
+# Phoenix Contact, ABB), B&R Automation Studio, Mitsubishi GX Works.
+#
+# Crypto on PLC platforms historically lived in vendor-supplied function-block
+# libraries and OPC UA stacks. The PQC migration story for OT is regulatory
+# rather than performance-driven — CISA's "Securing Industrial Control Systems"
+# guidance and the ETSI/EN 303 645 stack are explicit about post-quantum
+# readiness for critical-infrastructure ICS. Replacing crypto in a SIL-rated
+# safety controller is a 12–24 month process (re-certification, factory
+# acceptance testing, customer-site cutover), so even today's findings are
+# load-bearing for 2030+ migration plans.
+#
+# Surface covered by this v1 pack:
+#   - Weak hash function blocks (MD5, SHA1) and direct call sites
+#   - Weak/legacy symmetric cipher function blocks (DES, 3DES/TDES, RC4)
+#   - RSA / asymmetric function blocks and key-generation calls
+#   - OPC UA SecurityPolicy URIs — Basic128Rsa15 + Basic256 (both deprecated
+#     in OPC UA 1.04+) and #None
+#   - Hardcoded key/secret/modulus string literals in `VAR CONSTANT` blocks
+#   - CODESYS OSCAT and SysCrypt library prefixes (OSCAT.NETWORK.MD5 etc.)
+#
+# Strategy: regex-only. No mature tree-sitter grammar for IEC 61131-3 exists
+# in the smacker module or in commonly maintained community forks.
+# Regex-only is the acceptable Tier-2.1
+# fallback. The rule IDs and DSL framing leave clean upgrade room if a Codesys
+# Foundation or PLCopen ST parser ships.
+#
+# All patterns are RE2-compatible (no lookbehind, no backreferences) and
+# match per-line — the scanner does NOT match across newlines. ST is
+# generally one-statement-per-line, which keeps this constraint comfortable.
+
+# ---------------------------------------------------------------------------
+# Weak hash — FUNCTION_BLOCK / FUNCTION declarations
+# ---------------------------------------------------------------------------
+- id: IEC61131_FB_MD5
+  language: iec61131
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: dependency
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    flags: i
+    pattern: '(?:FUNCTION_BLOCK|FUNCTION)\s+\w*MD5\w*\b'
+  message: "FUNCTION_BLOCK named MD5 — MD5 is cryptographically broken (collisions since 2004). Common in legacy SIMATIC/CODESYS crypto libraries."
+  recommendation: "Replace with a SHA-256 (or SHA-3) function block. For integrity-only checks switch to HMAC-SHA-256. PLCopen has a Security WG draft covering FB-level crypto API replacement."
+  cwe: [327, 328]
+  confidence: 0.9
+- id: IEC61131_FB_SHA1
+  language: iec61131
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: dependency
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    flags: i
+    pattern: '(?:FUNCTION_BLOCK|FUNCTION)\s+\w*SHA1\w*\b'
+  message: "FUNCTION_BLOCK named SHA1 — SHA-1 is cryptographically broken (SHAttered, 2017) and prohibited by CNSA 2.0 / NIST SP 800-131A for new designs."
+  recommendation: "Migrate to SHA-256 or SHA-3. For OPC UA stacks, switch the application-layer hash to SHA-256 and re-pin SecurityPolicy to Basic256Sha256 or Aes128_Sha256_RsaOaep."
+  cwe: [327, 328]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# Weak hash — direct call sites
+# ---------------------------------------------------------------------------
+- id: IEC61131_CALL_MD5
+  language: iec61131
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Matches MD5(...), MD5_Hash(...), MD5_Init(...). The variant suffixes cover
+  # Init/Update/Final stream APIs common in OSCAT and SysCrypt libraries.
+  detector:
+    type: regex
+    flags: i
+    pattern: '\bMD5(?:_Hash|_Init|_Update|_Final|_Calc|_Compute)?\s*\('
+  message: "MD5 invocation — MD5 is cryptographically broken; do not use for any new code on PLC platforms."
+  recommendation: "Use SHA-256 (or SHA-3) via the platform crypto FB library. For HMAC, use HMAC-SHA-256."
+  cwe: [328]
+  confidence: 0.85
+- id: IEC61131_CALL_SHA1
+  language: iec61131
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    flags: i
+    pattern: '\bSHA1(?:_Hash|_Init|_Update|_Final|_Calc|_Compute)?\s*\('
+  message: "SHA-1 invocation — SHA-1 is broken; prohibited for new designs by CNSA 2.0 / NIST SP 800-131A."
+  recommendation: "Use SHA-256 or SHA-3 via the platform crypto FB library."
+  cwe: [328]
+  confidence: 0.85
+# ---------------------------------------------------------------------------
+# Weak symmetric ciphers — function-block declarations
+# ---------------------------------------------------------------------------
+- id: IEC61131_FB_DES
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: dependency
+  quantum_safety: classically_broken
+  # Matches FB / FUNCTION named DES (not 3DES/TDES — those have a separate
+  # rule). The `\b` and the `(?!\w)` workaround via the explicit boundary on
+  # both sides keep DES_EDE3 from triggering this rule.
+  detector:
+    type: regex
+    pattern: '(?:FUNCTION_BLOCK|FUNCTION)\s+DES\b'
+  message: "FUNCTION_BLOCK DES — single-DES has a 56-bit effective key and is brute-forceable in hours on commodity hardware."
+  recommendation: "Replace with AES-256-GCM via the platform crypto FB library. For Siemens platforms, use SIMATIC.CRYPT.AES; CODESYS users should use SysCrypt.AES."
+  cwe: [327]
+  confidence: 0.92
+- id: IEC61131_FB_3DES
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: dependency
+  quantum_safety: grover_weakened
+  # Real-world FB names wrap the primitive (`TDES_Encryptor`, `TripleDES_FB`),
+  # so the alternation is bracketed by `\w*` to tolerate prefixes/suffixes
+  # while the alternation itself enumerates every common 3DES spelling. The
+  # bare `DES_*` suffix `DES_EDE3` is distinctive enough that no IEC61131_FB_DES
+  # collision risk exists.
+  detector:
+    type: regex
+    flags: i
+    pattern: '(?:FUNCTION_BLOCK|FUNCTION)\s+\w*(?:3DES|TDES|TripleDES|DES_EDE3|DES3)\w*\b'
+  message: "FUNCTION_BLOCK 3DES/TDES — Triple-DES is deprecated by NIST SP 800-131A (disallowed for encryption after 2023)."
+  recommendation: "Migrate to AES-256-GCM. On Rockwell Studio 5000 the modern AOI library exposes AES_ENCRYPT/AES_DECRYPT; on Siemens TIA Portal use SIMATIC.CRYPT.AES."
+  cwe: [327]
+  confidence: 0.92
+- id: IEC61131_FB_RC4
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: dependency
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '(?:FUNCTION_BLOCK|FUNCTION)\s+RC4\b'
+  message: "FUNCTION_BLOCK RC4 — RC4 is prohibited by RFC 7465 due to recoverable biases in the keystream."
+  recommendation: "Replace with AES-256-GCM or ChaCha20-Poly1305 via the platform crypto FB library."
+  cwe: [327]
+  confidence: 0.93
+# ---------------------------------------------------------------------------
+# Weak symmetric ciphers — direct call sites
+# ---------------------------------------------------------------------------
+- id: IEC61131_CALL_DES
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Matches DES(...), DES_Encrypt(...), DES_Decrypt(...), DES_Init(...).
+  # Suffix list is kept narrow so DES_EDE3_* doesn't trigger here — that's
+  # the IEC61131_FB_3DES rule's job.
+  detector:
+    type: regex
+    pattern: '\bDES(?:_Encrypt|_Decrypt|_Init|_Cipher)?\s*\('
+  message: "DES invocation — single-DES is brute-forceable; not approved for any modern use."
+  recommendation: "Switch to AES-256-GCM via the platform crypto FB library."
+  cwe: [327]
+  confidence: 0.85
+- id: IEC61131_CALL_RC4
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: '\bRC4(?:_Init|_Encrypt|_Decrypt|_Stream|_Cipher)?\s*\('
+  message: "RC4 invocation — RC4 is prohibited by RFC 7465."
+  recommendation: "Switch to AES-256-GCM or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.9
+# ---------------------------------------------------------------------------
+# OPC UA SecurityPolicy URIs — industrial vertical-specific signal
+# ---------------------------------------------------------------------------
+- id: IEC61131_OPCUA_BASIC128_RSA15
+  language: iec61131
+  category: weak-protocol
+  severity: high
+  algorithm: RSA
+  usage_type: tls_configuration
+  quantum_safety: vulnerable
+  # Matches the policy name as a string literal in either single quotes
+  # (CODESYS / TIA Portal SCL convention) or double quotes. The trailing
+  # quote anchor avoids false-matches inside longer URIs.
+  detector:
+    type: regex
+    pattern: '''Basic128Rsa15''|"Basic128Rsa15"'
+  message: "OPC UA SecurityPolicy Basic128Rsa15 — deprecated by OPC Foundation in UA 1.04 (uses RSA-PKCS1-v1.5 padding, AES-128 with SHA-1 HMAC)."
+  recommendation: "Pin SecurityPolicy to Basic256Sha256 or Aes256_Sha256_RsaPss. Note both remain classically OK but RSA underneath is quantum-vulnerable — plan migration to PQC-OPC-UA profiles as they stabilize."
+  cwe: [327, 326]
+  confidence: 0.97
+- id: IEC61131_OPCUA_BASIC256_SHA1
+  language: iec61131
+  category: weak-protocol
+  severity: high
+  algorithm: SHA1
+  usage_type: tls_configuration
+  quantum_safety: classically_broken
+  # Matches the legacy `Basic256` policy literal exclusively. Because the
+  # surrounding quote characters are part of the match, `'Basic256Sha256'`
+  # cannot accidentally trigger this rule — the closing quote is at a
+  # different offset.
+  detector:
+    type: regex
+    pattern: '''Basic256''|"Basic256"'
+  message: "OPC UA SecurityPolicy Basic256 — deprecated; uses SHA-1 for HMAC and RSA-OAEP with SHA-1. SHA-1 is broken (SHAttered)."
+  recommendation: "Pin SecurityPolicy to Basic256Sha256 or Aes256_Sha256_RsaPss. Audit certificate-signature algorithms for SHA-1 separately."
+  cwe: [327, 326]
+  confidence: 0.97
+- id: IEC61131_OPCUA_SECURITY_NONE
+  language: iec61131
+  category: weak-protocol
+  severity: critical
+  algorithm: None
+  usage_type: tls_configuration
+  quantum_safety: vulnerable
+  # Matches the OPC UA `#None` policy URI in either literal form. Hitting
+  # this rule means the OPC UA channel runs without confidentiality OR
+  # integrity — the worst configuration possible short of disabling the
+  # protocol entirely.
+  detector:
+    type: regex
+    pattern: 'SecurityPolicy(?:Uri)?\s*:=\s*[''"][^''"]*#None[''"]|''http://opcfoundation\.org/UA/SecurityPolicy#None'''
+  message: "OPC UA SecurityPolicy #None — OPC UA channel runs without encryption or message integrity. Catastrophic posture for a control surface."
+  recommendation: "Set SecurityPolicy to Basic256Sha256 (minimum) and SecurityMode to SignAndEncrypt. Provision per-endpoint application certificates and pin trust lists."
+  cwe: [319, 311]
+  confidence: 0.95
+# ---------------------------------------------------------------------------
+# Hardcoded crypto material
+# ---------------------------------------------------------------------------
+- id: IEC61131_HARDCODED_KEY_STRING
+  language: iec61131
+  category: hardcoded-secret
+  severity: critical
+  algorithm: HardcodedKey
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  # Matches `<name> : STRING := '<value>';` declarations where the variable
+  # name contains KEY/SECRET/PASSWORD/MODULUS. ST uses `:=` for assignment
+  # so this anchors well on the declaration line. The character class
+  # `[^''"]+` keeps the value substring constrained to one literal.
+  detector:
+    type: regex
+    flags: i
+    pattern: '\w*(?:KEY|SECRET|PASSWORD|PASSWD|MODULUS)\w*\s*:\s*STRING(?:\[\d+\])?\s*:=\s*[''"][^''"]+[''"]'
+  message: "Hardcoded key/secret/modulus/password STRING literal in declaration — extracting from a PLC binary or upload file is trivial."
+  recommendation: "Load secrets from a controller-protected key store at runtime (Siemens TIA `WebServer.UserAdministration`, CODESYS `Encrypted Application`, Rockwell `Logix Designer` Source Protection). Never embed key material in source-controlled ST."
+  cwe: [798, 321]
+  confidence: 0.88
+# ---------------------------------------------------------------------------
+# CODESYS-specific library prefixes
+# ---------------------------------------------------------------------------
+- id: IEC61131_CODESYS_OSCAT_WEAK_HASH
+  language: iec61131
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # OSCAT (Open Source Community for Automation Technology) is the most
+  # widespread free FB library in the CODESYS world. OSCAT_NETWORK contains
+  # MD5 and SHA1 wrappers; flagging them by qualified-call form catches the
+  # dependency even when the FB instance is named generically.
+  detector:
+    type: regex
+    pattern: '\bOSCAT(?:_NETWORK|\.NETWORK)?\.(?:MD5|SHA1)\b'
+  message: "OSCAT.NETWORK.MD5/SHA1 — OSCAT's legacy hash wrappers; both algorithms are broken."
+  recommendation: "Use OSCAT_NETWORK_SHA2 (SHA-256/384/512) instead. For CODESYS 3.5.18+ the SysCrypt library exposes SHA-256/SHA-3 directly."
+  cwe: [327, 328]
+  confidence: 0.95
+- id: IEC61131_CODESYS_SYSCRYPT_LEGACY
+  language: iec61131
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Matches the CODESYS SysCrypt and SIMATIC SCL crypto prefixes paired with
+  # a weak primitive. Catches SysCrypt.DES_Encrypt, SIMATIC.CRYPT.DES, etc.
+  # The whitespace tolerance handles indented qualified-call sites.
+  detector:
+    type: regex
+    flags: i
+    pattern: '\b(?:SysCrypt|SIMATIC\.CRYPT|SIMATIC_CRYPT)\.(?:DES|3DES|TDES|RC4|MD5|SHA1)\b'
+  message: "Vendor crypto library legacy primitive — SysCrypt or SIMATIC.CRYPT module wrapping a broken algorithm."
+  recommendation: "Switch to the AES-256-GCM / SHA-256 entry points in the same library. Vendor docs: CODESYS SysCrypt § AES; Siemens TIA Portal § Encrypted Communication."
+  cwe: [327]
+  confidence: 0.93

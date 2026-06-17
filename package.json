@@ -1,0 +1,20 @@
+{
+  "name": "relixq-oss",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Relix-Q OSS — JavaScript/TypeScript workspace root. Hosts the OSS npm packages (packages/npm/*) and the canonical OSS web app (apps/web).",
+  "license": "Apache-2.0",
+  "author": "Yasvanth Udayakumar",
+  "workspaces": [
+    "packages/npm/*",
+    "apps/web"
+  ],
+  "scripts": {
+    "build:packages": "npm run build --workspace @relix-q/web-client && npm run build --workspace @relix-q/web-components",
+    "build:web": "npm run build --workspace web",
+    "dev:web": "npm run dev --workspace web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

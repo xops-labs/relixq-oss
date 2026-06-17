@@ -1,0 +1,96 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: SWIFT_SEC_KEY_CREATE_RANDOM
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "unknown"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "\\bSecKeyCreateRandomKey\\s*\\("
+  message: "SecKeyCreateRandomKey(...) — Security framework key generation; inspect the kSecAttrKeyType to confirm RSA/ECC are quantum-vulnerable."
+  cwe: [327]
+
+- id: SWIFT_SEC_KEY_CREATE_RSA
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "kSecAttrKeyTypeRSA\\b"
+  message: "kSecAttrKeyTypeRSA — RSA is quantum-vulnerable; Shor's algorithm breaks it on a CRQC."
+  cwe: [327]
+  confidence: 0.9
+
+- id: SWIFT_SEC_KEY_CREATE_EC
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "ECDSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "kSecAttrKeyTypeEC(?:SECPrimeRandom)?\\b"
+  message: "kSecAttrKeyTypeEC[SECPrimeRandom] — classical ECC is quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.9
+
+- id: SWIFT_IMPORT_COMMONCRYPTO
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "unknown"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+CommonCrypto\\b"
+  message: "import CommonCrypto — legacy C-shim crypto surface; review for MD5/SHA1/DES/3DES/RC4 use."
+  cwe: [327]
+
+- id: SWIFT_IMPORT_SECURITY
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "unknown"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+Security\\b"
+  message: "import Security — Security framework exposes SecKey RSA/ECC APIs; review for quantum-vulnerable key generation."
+  cwe: [327]
+
+- id: SWIFT_IMPORT_CRYPTOKIT
+  language: swift
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "unknown"
+  usage_type: "import"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?:^|\\b)import\\s+CryptoKit\\b"
+  message: "import CryptoKit — modern Apple crypto, but no PQC primitives are exposed as of macOS/iOS current. Audit hash/sign usage for `Insecure.*` references."
+  cwe: [327]

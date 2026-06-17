@@ -1,0 +1,130 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Solidity crypto rules
+#
+# Solidity is the Ethereum / EVM-compatible smart-contract language. Its
+# cryptographic surface area is dominated by:
+#   - ECDSA over secp256k1: every wallet signature, `ecrecover` precompile
+#     at address 0x01, plus OpenZeppelin's ECDSA library.
+#   - Hashing: `keccak256` (Ethereum's SHA-3 variant) is the workhorse;
+#     `sha256` (precompile 0x02) and `ripemd160` (0x03) appear in cross-chain
+#     and Bitcoin-bridged code.
+#   - Modular exponentiation: `modexp` precompile at 0x05 powers BN/BLS work.
+# All of these are quantum-vulnerable. As of 2026 no production EVM chain
+# ships a PQC signature precompile; migration debt is enormous and the
+# recommendations below point to research-stage Falcon-512 / Dilithium /
+# SLH-DSA precompile proposals (EIP-7212 successors) plus interim hybrid
+# signature schemes implemented in contract code via libraries.
+#
+# This rule pack is regex-only. There is no `github.com/smacker/go-tree-sitter/
+# solidity` binding in the smacker module pinned by go.mod
+# (v0.0.0-20240827094217-dd81d9e9be82), and no other community CGO binding for
+# the JoranHonig/tree-sitter-solidity grammar ships in a form we can vendor
+# without a custom CGO wrapper. Falling back to
+# regex-only is acceptable; AST polish can come later when a binding lands.
+#
+# Solidity syntax is regular enough that regex catches the practical
+# patterns: contract-level keywords, library calls, precompile staticcalls,
+# inline assembly blocks, pragma directives. False positives are kept low by
+# anchoring on full identifier boundaries and (where needed) line-start
+# whitespace to avoid matching identifiers inside string literals.
+
+# ---------------------------------------------------------------------------
+# Built-in precompile calls (global functions resolving to 0x01 / 0x02 / 0x03)
+# ---------------------------------------------------------------------------
+- id: SOLIDITY_KECCAK256_ENCODEPACKED
+  language: solidity
+  category: weak-hash
+  severity: high
+  algorithm: Keccak256
+  usage_type: hashing
+  quantum_safety: vulnerable
+  # `keccak256(abi.encodePacked(...))` with two or more dynamic-type arguments
+  # is a known hash-collision footgun: encodePacked is non-injective for
+  # dynamic types (string, bytes). SWC-133. Independent of PQC concerns but
+  # we surface it as a high-severity finding so the inventory captures it.
+  detector:
+    type: regex
+    pattern: '\bkeccak256\s*\(\s*abi\.encodePacked\s*\('
+  message: "keccak256(abi.encodePacked(...)) — hash-collision risk if any two arguments are dynamic types (SWC-133)."
+  recommendation: "Use abi.encode(...) instead of abi.encodePacked(...) when hashing multiple dynamic values, or include explicit length prefixes / delimiters."
+  cwe: [328]
+  confidence: 0.88
+- id: SOLIDITY_RIPEMD160
+  language: solidity
+  category: weak-hash
+  severity: high
+  algorithm: RIPEMD160
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # `ripemd160(...)` global resolves to precompile 0x03. 160-bit output is
+  # already below modern collision-resistance targets (classical birthday
+  # bound is 2^80) and Grover pushes effective preimage security to 80
+  # bits — unambiguously weak.
+  detector:
+    type: regex
+    pattern: '\bripemd160\s*\('
+  message: "ripemd160(...) — 160-bit hash; below modern collision-resistance targets and quantum-weakened."
+  recommendation: "Replace with keccak256 or sha256 for new code; for Bitcoin-bridge compatibility, gate the legacy use behind a chain-id check and plan migration."
+  cwe: [328]
+  confidence: 0.92
+# ---------------------------------------------------------------------------
+# Hardcoded private-key material
+# ---------------------------------------------------------------------------
+- id: SOLIDITY_HARDCODED_PRIVATE_KEY
+  language: solidity
+  category: hardcoded-key
+  severity: critical
+  algorithm: PrivateKey
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  # Heuristic: a bare `0x` followed by exactly 64 hex chars and a word
+  # boundary. Catches `bytes32 privateKey = 0x...;` and EOA secret-key
+  # literals. We accept a small false-positive rate (transaction hashes are
+  # the same shape) — confidence is high because the *literal in source*
+  # itself is a smell regardless of intent.
+  detector:
+    type: regex
+    pattern: '\b0x[0-9a-fA-F]{64}\b'
+  message: "Embedded 32-byte hex literal — possible hardcoded private key or sensitive secret."
+  recommendation: "Never commit private-key material to source. Move to environment-injected deployment scripts or hardware-signer flows."
+  cwe: [798]
+  confidence: 0.6
+# ---------------------------------------------------------------------------
+# Weak randomness / authentication anti-patterns (quantum-tangent)
+# ---------------------------------------------------------------------------
+- id: SOLIDITY_BLOCK_TIMESTAMP_RNG
+  language: solidity
+  category: weak-rng
+  severity: high
+  algorithm: WeakRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `block.timestamp` mixed into keccak as a randomness source is the
+  # classic Solidity RNG anti-pattern: miners / proposers can influence it
+  # within tolerance. SWC-120 / SWC-116. Quantum-tangent because the
+  # vulnerability is structural, not algorithmic, but PQC inventories often
+  # want to capture it.
+  detector:
+    type: regex
+    pattern: '\bkeccak256\s*\([^)]*\bblock\.(?:timestamp|number|difficulty|prevrandao)\b'
+  message: "keccak256 over block.timestamp / block.number / block.difficulty — predictable randomness (SWC-120 / SWC-116)."
+  recommendation: "Use a commit-reveal scheme or an external VRF (e.g. Chainlink VRF v2). Long-term, plan PQC-safe VRF based on lattice assumptions."
+  cwe: [338]
+  confidence: 0.88
+- id: SOLIDITY_BLOCKHASH_RNG
+  language: solidity
+  category: weak-rng
+  severity: high
+  algorithm: WeakRNG
+  usage_type: random
+  quantum_safety: vulnerable
+  # `blockhash(block.number - N)` as RNG — same SWC-120 issue.
+  detector:
+    type: regex
+    pattern: '\bblockhash\s*\('
+  message: "blockhash(...) — predictable, miner/proposer-influenceable; not suitable as a randomness source."
+  recommendation: "Use Chainlink VRF or an equivalent verifiable randomness service."
+  cwe: [338]
+  confidence: 0.75

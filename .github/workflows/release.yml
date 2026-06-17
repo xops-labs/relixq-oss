@@ -1,0 +1,226 @@
+# Release automation for Relix-Q Community. Triggered by version tags
+# (v0.3.0, v1.0.0-rc1, ...). Runs the Go test suite, then in parallel:
+#   - goreleaser: per-platform archives (zip/tar.gz) bundling relixq +
+#     relixq-scan-code + the community rules, deb/rpm packages, SHA256
+#     checksums, and the GitHub Release itself
+#   - image: the slim scanner image to GHCR (version + sha tags, `latest`
+#     on non-prerelease), signed with cosign keyless
+#   - msi: the Windows .msi installer (after goreleaser created the release),
+#     Authenticode-signed when signing secrets are configured
+#
+# Required secrets: none for an unsigned release (GITHUB_TOKEN suffices).
+# Optional Windows code signing: WINDOWS_SIGNING_CERT_PFX_BASE64 +
+# WINDOWS_SIGNING_CERT_PASSWORD — see docs/RELEASE.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub Release + upload assets
+  packages: write   # push the image to GHCR
+  id-token: write   # cosign keyless signing (GitHub OIDC)
+
+jobs:
+  test:
+    name: Go tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/go/go.mod
+          cache-dependency-path: packages/go/go.sum
+
+      - name: go test (incl. validation gate)
+        working-directory: packages/go
+        env:
+          # Gate the release on the configuration it ships: every artifact
+          # (archives, MSI, slim image) is built CGO-off. The CGO tree-sitter
+          # tier is not part of release artifacts and has a known-failing
+          # juliaast test suite under CGO; track that separately.
+          CGO_ENABLED: '0'
+        run: go test ./...
+
+  goreleaser:
+    name: Archives, packages, checksums
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/go/go.mod
+          cache-dependency-path: packages/go/go.sum
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    name: Scanner image (GHCR)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/relixq
+          # `latest` is added automatically for non-prerelease semver tags
+          # (flavor latest=auto); main-branch builds are tagged `main` by
+          # relixq-image.yml instead.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.scanner
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (cosign keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/${{ github.repository_owner }}/relixq@${DIGEST}"
+
+  msi:
+    name: Windows MSI installer
+    needs: goreleaser   # the GitHub Release must exist before we upload to it
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/go/go.mod
+          cache-dependency-path: packages/go/go.sum
+
+      - name: Compute versions
+        id: ver
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          # MSI ProductVersion must be numeric x.y.z — strip any prerelease.
+          $msiVersion = ($version -split '-')[0]
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "msi_version=$msiVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Build binaries
+        shell: pwsh
+        working-directory: packages/go
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          $module = 'github.com/relix-q/relix-q/cmd/relixq'
+          $version = '${{ steps.ver.outputs.version }}'
+          $commit = (git rev-parse --short HEAD)
+          go build -trimpath -ldflags "-s -w -X $module/cmd.Version=$version -X $module/cmd.Commit=$commit" -o ..\..\dist\msi-stage\relixq.exe ./cmd/relixq
+          go build -trimpath -ldflags "-s -w -X main.version=$version -X main.commit=$commit" -o ..\..\dist\msi-stage\relixq-scan-code.exe ./cmd/relixq-scan-code
+
+      - name: Stage rules and license
+        shell: pwsh
+        run: |
+          Copy-Item packages\go\rules-community dist\msi-stage\rules -Recurse
+          Copy-Item LICENSE dist\msi-stage\LICENSE.txt
+
+      - name: Check for signing certificate
+        id: signing
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CERT_B64)) {
+            "enabled=false" >> $env:GITHUB_OUTPUT
+            Write-Host "::notice::WINDOWS_SIGNING_CERT_PFX_BASE64 not configured - the MSI will be unsigned (see docs/RELEASE.md)."
+          } else {
+            "enabled=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Sign binaries (Authenticode)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            dist\msi-stage\relixq.exe dist\msi-stage\relixq-scan-code.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item $pfx
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          # WiX v6 pinned: v7 introduced an OSMF EULA gate that breaks
+          # unattended CI installs.
+          dotnet tool install --global wix --version '6.*'
+          # StageDir must be absolute: WiX resolves relative bind paths
+          # against the .wxs file's directory, not the working directory.
+          # -wx turns warnings into errors so a zero-file harvest (WIX8600)
+          # fails the build instead of shipping an empty installer.
+          wix build packaging\windows\relixq.wxs -arch x64 -wx `
+            -d "StageDir=$env:GITHUB_WORKSPACE\dist\msi-stage" `
+            -d Version=${{ steps.ver.outputs.msi_version }} `
+            -o dist\relixq_${{ steps.ver.outputs.version }}_windows_amd64.msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sign MSI (Authenticode)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            dist\relixq_${{ steps.ver.outputs.version }}_windows_amd64.msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item $pfx
+
+      - name: Checksum and upload to the release
+        shell: pwsh
+        run: |
+          $msi = "dist\relixq_${{ steps.ver.outputs.version }}_windows_amd64.msi"
+          $name = Split-Path $msi -Leaf
+          $hash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+          # LF-terminated, no BOM, so `sha256sum -c` accepts it on any OS
+          # (Out-File would emit CRLF, which breaks the filename match).
+          [IO.File]::WriteAllText("$(Resolve-Path $msi).sha256", "$hash  $name`n")
+          gh release upload '${{ github.ref_name }}' $msi "$msi.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,0 +1,78 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Go crypto rules
+# AST rules use the goast runner query format:
+#   call:<pkg>.<Func>    — matches pkg.Func(...) call expressions
+#   import:<path>        — matches import statements
+#   typeref:<pkg>.<Sel>  — matches selector used as a value (not a call)
+- id: GO_SHA1_NEW
+  language: go
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:sha1.New"
+  message: "crypto/sha1.New — SHA-1 is cryptographically broken."
+  recommendation: "Use crypto/sha256 or golang.org/x/crypto/sha3."
+  cwe: [328]
+  confidence: 0.97
+- id: GO_MD5_NEW
+  language: go
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:md5.New"
+  message: "crypto/md5.New — MD5 is cryptographically broken."
+  recommendation: "Use crypto/sha256 or sha3."
+  cwe: [328]
+  confidence: 0.97
+- id: GO_DES_IMPORT
+  language: go
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "import:crypto/des"
+  message: "Import of crypto/des — DES/3DES is broken; deprecated since 2017."
+  recommendation: "Use AES-GCM or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.97
+- id: GO_RC4_IMPORT
+  language: go
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "import:crypto/rc4"
+  message: "Import of crypto/rc4 — RC4 is broken and must not be used."
+  recommendation: "Use ChaCha20-Poly1305 or AES-GCM."
+  cwe: [327]
+  confidence: 0.97
+- id: GO_WEAK_RAND_IMPORT
+  language: go
+  category: weak-prng
+  severity: high
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  detector:
+    type: ast
+    query: "import:math/rand"
+  message: "Import of math/rand — cryptographically weak PRNG must not be used for security-sensitive values."
+  recommendation: "Use crypto/rand.Read for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.8

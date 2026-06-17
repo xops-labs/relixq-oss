@@ -1,0 +1,138 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Kotlin crypto rules
+# Kotlin runs on the JVM and consumes JCA/JCE directly (MessageDigest, Cipher,
+# KeyPairGenerator, SecureRandom), plus Android's android.security.keystore on
+# Android targets. Rule shapes mirror java/crypto.yaml since the APIs are
+# identical — the difference is purely syntactic (no `new` keyword, optional
+# semicolons, `import x.y.* `, `import x.y as Z`).
+#
+# The kotlinast (Tree-sitter) runner accepts these query forms:
+#   call:<Type>.<method>      — Type.method(...) or receiver.method(...)
+#   new:<Type>                — Type(...) constructor invocation (Kotlin has no `new`)
+#   import:<package.Class>    — import package.Class (also matches package.*)
+#   fieldref:<Type>.<field>   — Type.field member access NOT in call position
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that need
+# to discriminate by string literal (e.g. KeyPairGenerator.getInstance("RSA")
+# vs "DSA") stay on the regex detector until the DSL gains literal-arg support.
+- id: KOTLIN_DES_CIPHER
+  language: kotlin
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Multi-algorithm alternation in the arg literal; regex stays.
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"(?:DES|DESede|TripleDES|3DES)[/"\\)]'
+  message: "Cipher.getInstance(\"DES...\") — DES/3DES is broken and deprecated since 2017."
+  recommendation: "Use AES-GCM (Cipher.getInstance(\"AES/GCM/NoPadding\")) or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.92
+- id: KOTLIN_RC4_CIPHER
+  language: kotlin
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'Cipher\.getInstance\s*\(\s*"(?:RC4|ARCFOUR)"'
+  message: "Cipher.getInstance(\"RC4\"|\"ARCFOUR\") — RC4 is broken (RFC 7465 prohibits it in TLS)."
+  recommendation: "Use AES-GCM or ChaCha20-Poly1305."
+  cwe: [327]
+  confidence: 0.95
+- id: KOTLIN_MD5_DIGEST
+  language: kotlin
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Mm][Dd][-]?5"'
+  message: "MessageDigest.getInstance(\"MD5\") — MD5 is cryptographically broken."
+  recommendation: "Use SHA-256 (MessageDigest.getInstance(\"SHA-256\")) or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: KOTLIN_SHA1_DIGEST
+  language: kotlin
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  # Arg-value discrimination needed; regex stays.
+  detector:
+    type: regex
+    pattern: 'MessageDigest\.getInstance\s*\(\s*"[Ss][Hh][Aa]-?1"'
+  message: "MessageDigest.getInstance(\"SHA-1\") — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use SHA-256 or SHA-3."
+  cwe: [328]
+  confidence: 0.97
+- id: KOTLIN_WEAK_PRNG
+  language: kotlin
+  category: weak-prng
+  severity: high
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  # AST: `Random(...)` constructor call. Kotlin has no `new` keyword, so the
+  # constructor invocation is syntactically `Random()`. This matches both
+  # java.util.Random and kotlin.random.Random — rule authors who want to
+  # whitelist kotlin.random.Random should pair this with an import-based filter
+  # downstream. The fully-qualified form `java.util.Random()` doesn't match
+  # because the AST sees it as a navigation chain, not a bare identifier.
+  detector:
+    type: ast
+    query: "new:Random"
+  message: "Random() constructor — java.util.Random is a weak PRNG and kotlin.random.Random is also non-cryptographic. Neither must be used for security-sensitive values."
+  recommendation: "Use java.security.SecureRandom for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.75
+- id: KOTLIN_INSECURE_RANDOM_IMPORT
+  language: kotlin
+  category: weak-prng
+  severity: medium
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  # AST: surfaces `import java.util.Random` as a low-confidence signal that
+  # complements the constructor-level rule above. The two together survive
+  # aliasing tricks like `import java.util.Random as R` followed by `R()`
+  # (the import alias is stripped before matching).
+  detector:
+    type: ast
+    query: "import:java.util.Random"
+  message: "import java.util.Random — Random is a weak PRNG and must not be used for security-sensitive values."
+  recommendation: "Import java.security.SecureRandom instead for key material, nonces, and tokens."
+  cwe: [338]
+  confidence: 0.6
+# ──────────────────────────────────────────────────────────────────────────
+# Android-specific — android.security.keystore.KeyGenParameterSpec.Builder
+# configurations that select weak digests or short RSA keys.
+# ──────────────────────────────────────────────────────────────────────────
+- id: KOTLIN_ANDROID_KEYSTORE_SHA1_DIGEST
+  language: kotlin
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  # KeyGenParameterSpec.Builder(...).setDigests(KeyProperties.DIGEST_SHA1)
+  # The AST DSL can't yet match argument values, so we use a regex that's
+  # tolerant of whitespace and chained-builder formatting.
+  detector:
+    type: regex
+    pattern: 'setDigests\s*\([^)]*KeyProperties\.DIGEST_SHA1'
+  message: "KeyGenParameterSpec.Builder.setDigests(KeyProperties.DIGEST_SHA1) — SHA-1 in the Android Keystore is broken for signing."
+  recommendation: "Use KeyProperties.DIGEST_SHA256 or DIGEST_SHA512. For PQC readiness, plan migration to ML-DSA-backed signing where the keystore provider supports it."
+  cwe: [328]
+  confidence: 0.95

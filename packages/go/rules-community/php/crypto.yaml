@@ -1,0 +1,201 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# PHP crypto rules
+# PHP cryptography spans several eras of API: legacy mcrypt_* (removed in PHP
+# 7.2 but still common in older code we must scan), modern openssl_* and
+# hash(), the popular phpseclib library, and password_hash/crypt. None of the
+# mainstream PHP stacks have first-class PQC support yet — sodium_* gains
+# ML-KEM in newer libsodium builds and OpenSSL 3.x can plug in PQC providers,
+# but migration today is "swap libraries", not "swap algorithm parameter".
+#
+# The phpast (z7zmey/php-parser) runner accepts these query forms:
+#   call:<name>                 — free function call `name(...)`
+#   method:<Class>.<method>     — $obj->method(...) OR Class::method(...)
+#   new:<Class>                 — new Class(...) or new \Foo\Bar(...)
+#   use:<namespace.Class>       — use Namespace\Class; (also `.*` wildcard)
+#   const:<NAME>                — bare constant reference (e.g. MCRYPT_DES)
+#
+# Argument-value matching is intentionally NOT in the AST DSL — rules that
+# need to discriminate by string literal (e.g. hash('md5', ...) vs
+# hash('sha256', ...)) stay on the regex detector until the DSL gains literal-
+# arg support.
+
+# --- Built-in hash functions -------------------------------------------------
+- id: PHP_MD5_BUILTIN
+  language: php
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:md5"
+  message: "md5() — MD5 is cryptographically broken and unsuitable for any security purpose."
+  recommendation: "Use hash('sha256', $data) or hash('sha3-256', $data). For password storage, use password_hash() with PASSWORD_BCRYPT or PASSWORD_ARGON2ID."
+  cwe: [328]
+  confidence: 0.97
+- id: PHP_SHA1_BUILTIN
+  language: php
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:sha1"
+  message: "sha1() — SHA-1 is cryptographically broken (SHAttered, 2017)."
+  recommendation: "Use hash('sha256', $data) or hash('sha3-256', $data)."
+  cwe: [328]
+  confidence: 0.97
+- id: PHP_CRC32_BUILTIN
+  language: php
+  category: weak-hash
+  severity: medium
+  algorithm: CRC32
+  usage_type: hashing
+  quantum_safety: vulnerable
+  detector:
+    type: ast
+    query: "call:crc32"
+  message: "crc32() is a checksum, not a cryptographic hash — easily collidable."
+  recommendation: "If a cryptographic digest is needed, use hash('sha256', $data). crc32 is acceptable for non-security integrity checks only."
+  cwe: [328]
+  confidence: 0.9
+# hash() with an explicit algorithm argument — regex catches the literal-arg
+# variants the AST DSL can't yet inspect.
+- id: PHP_HASH_MD_FAMILY
+  language: php
+  category: weak-hash
+  severity: high
+  algorithm: MD5
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: "hash\\s*\\(\\s*['\"](?:md2|md4|md5)['\"]"
+  message: "hash() called with an MD-family algorithm (md2/md4/md5) — all are broken."
+  recommendation: "Use hash('sha256', $data) or hash('sha3-256', $data)."
+  cwe: [328]
+  confidence: 0.95
+- id: PHP_HASH_SHA1
+  language: php
+  category: weak-hash
+  severity: high
+  algorithm: SHA1
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: "hash\\s*\\(\\s*['\"]sha1['\"]"
+  message: "hash('sha1', ...) — SHA-1 is cryptographically broken."
+  recommendation: "Use hash('sha256', $data) or hash('sha3-256', $data)."
+  cwe: [328]
+  confidence: 0.95
+# --- mcrypt (deprecated in PHP 7.1, removed in 7.2 — still in legacy code) ---
+- id: PHP_MCRYPT_ENCRYPT
+  language: php
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "call:mcrypt_encrypt"
+  message: "mcrypt_encrypt() — mcrypt is deprecated since PHP 7.1 and removed in 7.2; the library is unmaintained."
+  recommendation: "Migrate to openssl_encrypt() with AES-GCM or sodium_crypto_secretbox()."
+  cwe: [327]
+  confidence: 0.97
+- id: PHP_MCRYPT_CREATE_IV
+  language: php
+  category: weak-prng
+  severity: medium
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: not_applicable
+  detector:
+    type: ast
+    query: "call:mcrypt_create_iv"
+  message: "mcrypt_create_iv() — mcrypt is deprecated and removed in PHP 7.2."
+  recommendation: "Use random_bytes() (CSPRNG) for IVs and key material."
+  cwe: [338]
+  confidence: 0.95
+- id: PHP_MCRYPT_DES_CONST
+  language: php
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "const:MCRYPT_DES"
+  message: "MCRYPT_DES — single-DES has a 56-bit key and is trivially brute-forced."
+  recommendation: "Migrate to AES-GCM via openssl_encrypt() or sodium_crypto_secretbox()."
+  cwe: [327]
+  confidence: 0.98
+- id: PHP_MCRYPT_3DES_CONST
+  language: php
+  category: weak-cipher
+  severity: high
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: ast
+    query: "const:MCRYPT_3DES"
+  message: "MCRYPT_3DES — Triple-DES is deprecated (NIST SP 800-131A) and Sweet32-vulnerable."
+  recommendation: "Migrate to AES-256-GCM."
+  cwe: [327]
+  confidence: 0.98
+- id: PHP_MCRYPT_RC4_CONST
+  language: php
+  category: weak-cipher
+  severity: high
+  algorithm: RC4
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: ast
+    query: "const:MCRYPT_ARCFOUR"
+  message: "MCRYPT_ARCFOUR — RC4 is broken (RFC 7465 prohibits it) and removed from TLS."
+  recommendation: "Migrate to AES-256-GCM or ChaCha20-Poly1305 (sodium_crypto_secretbox)."
+  cwe: [327]
+  confidence: 0.98
+# openssl_encrypt() with weak cipher names — regex inspects the literal arg.
+- id: PHP_OPENSSL_ENCRYPT_DES
+  language: php
+  category: weak-cipher
+  severity: high
+  algorithm: DES
+  usage_type: encryption
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: "openssl_encrypt\\s*\\([^,]+,\\s*['\"](?:des|des-ede3|des-ede3-cbc|3des|rc4)['\"]"
+  message: "openssl_encrypt() with DES/3DES/RC4 — these ciphers are broken or trivially brute-forced."
+  recommendation: "Use 'aes-256-gcm' or 'chacha20-poly1305'."
+  cwe: [327]
+  confidence: 0.95
+# --- crypt() and password_hash() --------------------------------------------
+
+# crypt() with a weak salt (e.g. legacy DES-CRYPT 2-character salt). Modern
+# code should call password_hash() instead; crypt() is preserved here as
+# medium severity because the algorithm depends on the salt format.
+- id: PHP_CRYPT_WEAK_SALT
+  language: php
+  category: weak-hash
+  severity: medium
+  algorithm: DES
+  usage_type: hashing
+  quantum_safety: classically_broken
+  detector:
+    type: regex
+    pattern: "\\bcrypt\\s*\\(\\s*[^,)]+,\\s*['\"][A-Za-z0-9./]{2}['\"]\\s*\\)"
+  message: "crypt() with a 2-character salt selects the legacy DES-CRYPT algorithm."
+  recommendation: "Use password_hash($password, PASSWORD_BCRYPT) or PASSWORD_ARGON2ID; never call crypt() directly for new code."
+  cwe: [327, 328]
+  confidence: 0.85

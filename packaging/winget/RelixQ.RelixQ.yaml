@@ -1,0 +1,7 @@
+# Version manifest. Submit all three files under
+# manifests/r/RelixQ/RelixQ/0.3.0/ in a PR to microsoft/winget-pkgs.
+PackageIdentifier: RelixQ.RelixQ
+PackageVersion: 0.3.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

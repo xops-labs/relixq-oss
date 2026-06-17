@@ -1,0 +1,102 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Helm chart crypto rule pack.
+# Helm templates are YAML with `{{ }}` Sprig interpolation. Routing matches
+# `.yaml` + `.tpl` basenames; content disambiguation relies on the `{{` /
+# Sprig-function patterns themselves.
+- id: HELM_GENCA_WEAK_KEY
+  language: yaml
+  category: weak-key-size
+  severity: high
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml", "*.tpl"]
+  detector:
+    type: regex
+    pattern: '\{\{[^}]*\b(genCA|genSelfSignedCert|genCert)\b[^}]*\b(1024|2048)\b'
+  message: "Helm template generates a CA / self-signed cert with a small key size (<= 2048 bits)."
+  recommendation: "Pass a key size of at least 3072 (or 4096 for long-lived CAs); plan PQC hybrid issuance when supported."
+  references:
+    - "https://helm.sh/docs/chart_template_guide/function_list/#cryptographic-and-security-functions"
+  cwe: [326]
+  confidence: 0.85
+- id: HELM_VALUES_TLS_PROTOCOL_DEPRECATED
+  language: yaml
+  category: weak-tls
+  severity: high
+  algorithm: TLS
+  usage_type: tls_config
+  quantum_safety: vulnerable
+  file_globs: ["values.yaml", "values.yml", "*.values.yaml"]
+  detector:
+    type: regex
+    pattern: '^\s*(protocol|tlsProtocol|minProtocol|tls_protocol|ssl_protocol):\s*[''"]?(TLSv?1\.0|TLSv?1\.1|TLSv1|SSLv2|SSLv3)[''"]?'
+    flags: i
+  message: "Helm values.yaml defaults TLS/SSL protocol to a deprecated version (1.0 / 1.1 / SSLv3)."
+  recommendation: "Default values.tls.protocol to TLSv1.2 (preferably TLSv1.3)."
+  cwe: [327]
+  confidence: 0.85
+- id: HELM_VALUES_RSA_KEYSIZE_DEFAULT
+  language: yaml
+  category: weak-key-size
+  severity: medium
+  algorithm: RSA
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs: ["values.yaml", "values.yml", "*.values.yaml"]
+  detector:
+    type: regex
+    pattern: '^\s*(keysize|key_size|rsaKeySize|rsa_key_size|keyBits|key_bits):\s*(1024|2048)\b'
+    flags: i
+  message: "Helm values.yaml defaults an RSA key size to 1024 or 2048 bits."
+  recommendation: "Raise the default to 3072 or 4096 and let chart consumers explicitly opt down if required."
+  cwe: [326]
+  confidence: 0.7
+- id: HELM_SHA1SUM_AS_SECRET
+  language: yaml
+  category: weak-hash
+  severity: medium
+  algorithm: SHA1
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml", "*.tpl"]
+  detector:
+    type: regex
+    pattern: '\{\{[^}]*\bsha1sum\b[^}]*\}\}'
+  message: "Helm template feeds sha1sum output into a value (use sha256sum for signed/secret material)."
+  recommendation: "Replace sha1sum with sha256sum; reserve sha1sum only for content-equality checksums where attack-resistance is irrelevant."
+  cwe: [328]
+  confidence: 0.5
+- id: HELM_MD5SUM_USED
+  language: yaml
+  category: weak-hash
+  severity: medium
+  algorithm: MD5
+  usage_type: signing
+  quantum_safety: classically_broken
+  file_globs: ["*.yaml", "*.yml", "*.tpl"]
+  detector:
+    type: regex
+    pattern: '\{\{[^}]*\bmd5sum\b[^}]*\}\}'
+  message: "Helm template uses md5sum; MD5 is broken for any signature or integrity-critical use."
+  recommendation: "Switch to sha256sum."
+  cwe: [328]
+  confidence: 0.7
+- id: HELM_RAND_KEY_LOW_ENTROPY
+  language: yaml
+  category: weak-prng
+  severity: high
+  algorithm: PRNG
+  usage_type: key_generation
+  quantum_safety: vulnerable
+  file_globs: ["*.yaml", "*.yml", "*.tpl"]
+  detector:
+    type: regex
+    pattern: '\{\{[^}]*\b(randAlpha|randAlphaNum|randNumeric|randAscii)\s+([0-9]|1[0-5])\b[^}]*\}\}'
+  message: "Helm template uses Sprig randAlpha/randAlphaNum with <= 15 chars to mint a secret/key."
+  recommendation: "Use at least 32 random chars and prefer randAlphaNum or external secret generation."
+  cwe: [331]
+  confidence: 0.75

@@ -1,0 +1,130 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# crypto-api DETECTION layer (OSS / community tree). These rules fire on
+# quantum-vulnerable cryptographic primitives so the free scanner sees the
+# threat surface it is named for. Regex is the recall floor; AST runners
+# restore precision where available. The migration-enrichment layer (NIST/FIPS
+# substitutions, vertical context, references) is supplied by an optional external rule-pack overlay
+# under the same id and is overlaid at report time by package enrich.
+
+- id: QSHARP_OPEN_CLASSICAL_CRYPTO
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "ClassicalCrypto"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?m)^\\s*open\\s+Microsoft\\.Quantum\\.Crypto(?:\\.[A-Za-z0-9_]+)*\\s*;"
+  message: "`open Microsoft.Quantum.Crypto.*` — Q# classical-crypto namespace imported; review for production exposure."
+  cwe: [327]
+  confidence: 0.7
+
+- id: QSHARP_OPEN_DOTNET_RSA
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "dependency"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?m)^\\s*open\\s+System\\.Security\\.Cryptography(?:\\.[A-Za-z0-9_]+)*\\s*;"
+  message: "`open System.Security.Cryptography.*` from Q# — classical BCL crypto bridged into quantum code."
+  cwe: [327]
+  confidence: 0.85
+
+- id: QSHARP_HARDCODED_RSA_KEYSIZE_1024
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 1024
+  detector:
+    type: regex
+    pattern: "(?i)(?:let|mutable)\\s+(?:keySize|modulus|rsaSize|nBits|keyBits)\\s*(?::\\s*(?:Int|BigInt|Long))?\\s*=\\s*1024\\b"
+  message: "Hardcoded 1024-bit RSA key parameter in Q# — below NIST 2030 floor and quantum-vulnerable."
+  cwe: [326, 327]
+  confidence: 0.85
+
+- id: QSHARP_HARDCODED_RSA_KEYSIZE_2048
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: high
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  key_size: 2048
+  detector:
+    type: regex
+    pattern: "(?i)(?:let|mutable)\\s+(?:keySize|modulus|rsaSize|nBits|keyBits)\\s*(?::\\s*(?:Int|BigInt|Long))?\\s*=\\s*2048\\b"
+  message: "Hardcoded 2048-bit RSA key parameter in Q# — meets classical guidance but quantum-vulnerable."
+  cwe: [327]
+  confidence: 0.78
+
+- id: QSHARP_HARDCODED_PUBLIC_EXPONENT
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "RSA"
+  usage_type: "key_generation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)(?:let|mutable)\\s+(?:exponent|publicExponent|e)\\s*(?::\\s*(?:Int|BigInt))?\\s*=\\s*(?:3|65537)\\b"
+  message: "Hardcoded RSA public exponent literal in Q# — review padding scheme."
+  cwe: [327]
+  confidence: 0.6
+
+- id: QSHARP_SHOR_INVOCATION
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Shor"
+  usage_type: "quantum_attack_research"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\b(?:Shor|PeriodFinding|EstimateFrequency|EstimateOverlapBetweenStates|QuantumPhaseEstimation)\\s*\\("
+  message: "Shor / period-finding / phase-estimation invocation in Q# — research surface for quantum attacks on classical crypto."
+  confidence: 0.55
+
+- id: QSHARP_GROVER_INVOCATION
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: info
+  algorithm: "Grover"
+  usage_type: "quantum_attack_research"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\b(?:GroversAlgorithm|GroverSearch|AmplitudeAmplification)\\s*\\("
+  message: "Grover's-algorithm invocation in Q# — symmetric-key search research."
+  confidence: 0.55
+
+- id: QSHARP_UNAUTH_MEASUREMENT_RESULT
+  language: qsharp
+  category: crypto-api
+  layer: detection
+  severity: medium
+  algorithm: "HMAC"
+  usage_type: "mac"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: "(?i)\\b(?:let|mutable)\\s+\\w+\\s*(?::\\s*[\\w<>,\\s]+)?\\s*=\\s*M(?:ResetZ|ResetX|ResetY|Reset)?\\s*\\("
+  message: "Quantum measurement result bound to local variable — confirm classical post-processing authenticates the result before exposing it (HMAC-SHA256 or AES-GCM on the host)."
+  cwe: [345, 353]
+  confidence: 0.4

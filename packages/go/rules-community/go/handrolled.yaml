@@ -1,0 +1,36 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+#
+# Hand-rolled crypto heuristics for Go. Like PYTHON_HANDROLLED_RSA these are
+# low-confidence leads, not verdicts: math/big modular exponentiation is the
+# core primitive of textbook RSA *and* finite-field DH, and also appears in
+# legitimate numerical code (FP risk accepted — that is exactly what the low
+# confidence plus the file-level promotion pass in scanner/promote.go are
+# for: a lone modexp stays a low-severity lead; modexp corroborated by a
+# crypto-fingerprint constant promotes to HANDROLLED_<ALG>_PROMOTED).
+- id: GO_BIGINT_MODEXP
+  language: go
+  category: handrolled-crypto
+  layer: detection
+  severity: low
+  algorithm: "RSA"
+  usage_type: "implementation"
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    # big.Int three-argument Exp — z.Exp(base, exponent, modulus) — is
+    # modular exponentiation. Two-argument math.Exp / big Exp with no
+    # modulus does not match (requires two commas inside the call).
+    pattern: '\.Exp\(\s*\w+\s*,\s*\w+\s*,'
+  message: "math/big modular exponentiation — possible hand-rolled RSA/DH (modexp is the core primitive of both; labeled RSA at low confidence, promotion resolves the algorithm when a corroborating fingerprint is present)."
+  recommendation: "Replace hand-rolled public-key math with a vetted library, then migrate to ML-KEM (FIPS 203) / ML-DSA (FIPS 204)."
+  cwe: [327]
+  confidence: 0.35
+  examples:
+    match:
+      - "pub := new(big.Int).Exp(g, priv, p)"
+      - "shared.Exp(peerPub, priv, p)"
+    no_match:
+      - "y := math.Exp(2.0)"
+      - "result := z.Exp(base, exponent)"

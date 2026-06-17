@@ -1,0 +1,5 @@
+module example.com/corpus
+
+go 1.22
+
+require github.com/cloudflare/circl v1.3.9

@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem in Relix-Q OSS.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include secrets, private tokens, real private keys, or proprietary source.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Smallest repro wins. Include commands, scan mode, and input shape.
+      placeholder: |
+        1. Run ...
+        2. Scan ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.3.0 or commit SHA
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI scanner
+        - GitHub Action
+        - Web UI
+        - API
+        - Dependency scan
+        - TLS scan
+        - Rule pack / detector
+        - Packaging / release
+        - Documentation
+        - Other
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker, Go, .NET, Node/npm versions if relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      render: text

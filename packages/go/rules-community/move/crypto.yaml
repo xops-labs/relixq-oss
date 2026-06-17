@@ -1,0 +1,71 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# Move crypto rules
+#
+# Move is the resource-oriented smart-contract language originally designed for
+# Diem/Libra and now the dominant on-chain language for Aptos and Sui (plus
+# Diem-derived chains like Starcoin and 0L). Its cryptographic surface area is
+# concentrated in well-known stdlib / framework modules:
+#
+#   - `std::ed25519` / `aptos_std::ed25519` — Ed25519 signature verification
+#     and key construction. This is the default EOA signature on Aptos and the
+#     workhorse for off-chain attestation flows. Quantum-broken (Shor on the
+#     underlying Edwards-curve discrete log).
+#   - `aptos_std::secp256k1` — secp256k1 ECDSA, used for EVM-compat wallets
+#     and bridge flows. Same quantum vulnerability as Ethereum's ecrecover.
+#   - `sui::ecdsa_k1` / `sui::ecdsa_r1` — Sui's secp256k1 / secp256r1 ECDSA
+#     modules. Both quantum-vulnerable.
+#   - `0x1::hash::sha2_256` / `0x1::hash::sha3_256` / `sui::hash::keccak256` —
+#     hash primitives. Classically strong, but Grover halves preimage
+#     security; surfaced as informational signal for the PQC inventory.
+#   - `bcs::to_bytes` near signature/key material — BCS (Binary Canonical
+#     Serialization) is Move's canonical wire format; serializing a key or
+#     signature with BCS is a strong hint that a quantum-vulnerable primitive
+#     is being passed across a trust boundary.
+#   - Hardcoded `vector<u8>` literals matching 32 / 64 byte sizes — Ed25519
+#     keys are 32 bytes (pub) / 64 bytes (sig); secp256k1 is 33/65; embedded
+#     literal key material in source is a leakage smell regardless of intent.
+#
+# As of 2026 no production Move chain ships a PQC signature primitive in its
+# stdlib or framework. Aptos and Sui both have active research threads on
+# Falcon / ML-DSA migration but nothing has landed. Recommendations below
+# point to the inventory-and-prepare path: catalog every signature/hash call
+# site, design crypto-agile wrappers, and plan a flag-day fork once a PQC
+# module ships.
+#
+# This rule pack is regex-only. The smacker `go-tree-sitter` module pinned by
+# `go.mod` (v0.0.0-20240827094217-dd81d9e9be82) does not ship a Move grammar,
+# and the community `tree-sitter-move` grammar (aptos-labs and sui-foundation
+# forks both exist) would require a custom CGO wrapper to vendor — out of
+# scope for this pack.
+# Move's syntax is regular enough (no template metaprogramming, no macros in
+# the C-sense) that regex catches the practical patterns: `use` directives,
+# fully-qualified `module::func` calls, and BCS serialization sites.
+#
+# All rules are per-line and RE2-compatible. False positives are kept low by
+# anchoring on full path-component boundaries (`\b`) and the explicit `::`
+# separator that Move uses for module paths.
+
+# ---------------------------------------------------------------------------
+# Module imports — `use` directives surface dependencies at file scope
+# ---------------------------------------------------------------------------
+- id: MOVE_HARDCODED_KEY_LITERAL
+  language: move
+  category: hardcoded-key
+  severity: high
+  algorithm: PrivateKey
+  usage_type: key_storage
+  quantum_safety: vulnerable
+  # Heuristic: `vector[0x.., 0x.., ...]` literal with 32 to 64 bytes (Ed25519
+  # pubkey = 32B, Ed25519 sig = 64B, secp256k1 compressed pubkey = 33B,
+  # uncompressed = 65B, secp256k1 sig = 64-65B). Tight count band keeps the
+  # false-positive rate manageable. Confidence kept high because *any*
+  # in-source literal of this shape is a smell regardless of intent.
+  detector:
+    type: regex
+    pattern: 'vector\[\s*0x[0-9a-fA-F]{2}(?:\s*,\s*0x[0-9a-fA-F]{2}){31,63}\s*\]'
+  message: "Embedded vector<u8> literal (32-64 bytes) — possible hardcoded Ed25519 / secp256k1 key or signature."
+  recommendation: "Never commit private-key material or test-fixture signing keys to source. Move test vectors to a non-source location loaded at runtime, or generate them deterministically in a test setup helper."
+  cwe: [798]
+  confidence: 0.75

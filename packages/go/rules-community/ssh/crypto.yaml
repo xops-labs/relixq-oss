@@ -1,0 +1,226 @@
+# Copyright (c) 2026 Yasvanth Udayakumar
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE in the repository root for full terms.
+# OpenSSH configuration rules
+#
+# The scanner routes the conventional file names sshd_config / ssh_config to
+# language "ssh-config" (scanner/language.go), so these rules never fire on
+# arbitrary text. Directives are matched case-insensitively (sshd_config
+# keywords are case-insensitive) and only when uncommented (`^\s*Directive`),
+# so the commented-out defaults that ship in stock sshd_config files do not
+# flood the inventory.
+#
+# PQC posture: every classical SSH host-key and key-exchange algorithm is
+# Shor-broken. OpenSSH ships PQC hybrids for kex (sntrup761x25519-sha512,
+# mlkem768x25519-sha256 in 9.9+); host-key signatures await ML-DSA support.
+- id: SSH_HOSTKEY_RSA
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: RSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*HostKey\b[^#]*\bssh_host_rsa_key\b'
+    flags: i
+  message: "sshd HostKey uses an RSA host key - RSA host authentication is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Inventory for migration to ML-DSA (FIPS 204) host keys as OpenSSH support lands; plan host-key rotation."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKey /etc/ssh/ssh_host_rsa_key'
+    no_match:
+      - 'HostKey /etc/ssh/ssh_host_ed25519_key'
+- id: SSH_HOSTKEY_ECDSA
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: ECDSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*HostKey\b[^#]*\bssh_host_ecdsa_key\b'
+    flags: i
+  message: "sshd HostKey uses an ECDSA host key - ECDSA host authentication is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Inventory for migration to ML-DSA (FIPS 204) host keys as OpenSSH support lands; plan host-key rotation."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKey /etc/ssh/ssh_host_ecdsa_key'
+    no_match:
+      - 'HostKey /etc/ssh/ssh_host_rsa_key'
+- id: SSH_HOSTKEY_DSA
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: DSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*HostKey\b[^#]*\bssh_host_dsa_key\b'
+    flags: i
+  message: "sshd HostKey uses a DSA host key - DSA is classically deprecated (1024-bit) and quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Remove ssh-dss host keys now; migrate host authentication to ML-DSA (FIPS 204) as OpenSSH support lands."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKey /etc/ssh/ssh_host_dsa_key'
+    no_match:
+      - 'HostKey /etc/ssh/ssh_host_ecdsa_key'
+- id: SSH_HOSTKEY_ED25519
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: Ed25519
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*HostKey\b[^#]*\bssh_host_ed25519_key\b'
+    flags: i
+  message: "sshd HostKey uses an Ed25519 host key - EdDSA host authentication is quantum-vulnerable (Shor's algorithm); best classical choice, still needs a PQC plan."
+  recommendation: "Inventory for migration to ML-DSA (FIPS 204) host keys as OpenSSH support lands."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKey /etc/ssh/ssh_host_ed25519_key'
+    no_match:
+      - 'HostKey /etc/ssh/ssh_host_rsa_key'
+- id: SSH_KEX_ECDH
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: ECDH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*KexAlgorithms\b[^#]*\b(ecdh-sha2|curve25519-sha256)'
+    flags: i
+  message: "sshd KexAlgorithms allows classical elliptic-curve key exchange (ecdh-sha2-*/curve25519-sha256) - quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Prefer hybrid PQC kex: mlkem768x25519-sha256 (OpenSSH 9.9+) or sntrup761x25519-sha512."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256'
+    no_match:
+      - 'KexAlgorithms sntrup761x25519-sha512@openssh.com'
+- id: SSH_KEX_DH
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: DH
+  usage_type: key_exchange
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*KexAlgorithms\b[^#]*\bdiffie-hellman-group'
+    flags: i
+  message: "sshd KexAlgorithms allows finite-field Diffie-Hellman key exchange (diffie-hellman-group*) - quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Prefer hybrid PQC kex: mlkem768x25519-sha256 (OpenSSH 9.9+) or sntrup761x25519-sha512."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'KexAlgorithms diffie-hellman-group14-sha256'
+    no_match:
+      - 'KexAlgorithms curve25519-sha256'
+- id: SSH_CIPHERS_AES128
+  language: ssh-config
+  category: weak-cipher
+  layer: detection
+  severity: medium
+  algorithm: AES-128
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  key_size: 128
+  detector:
+    type: regex
+    pattern: '^\s*Ciphers\b[^#]*\baes128-'
+    flags: i
+  message: "sshd Ciphers allows aes128-* - 128-bit AES keys are weakened to ~64-bit security by Grover's algorithm."
+  recommendation: "Use AES-256 (aes256-gcm@openssh.com) to retain a 128-bit security margin."
+  cwe: [326]
+  confidence: 0.95
+  examples:
+    match:
+      - 'Ciphers aes128-ctr,aes256-ctr'
+    no_match:
+      - 'Ciphers aes256-gcm@openssh.com'
+- id: SSH_CIPHERS_3DES
+  language: ssh-config
+  category: weak-cipher
+  layer: detection
+  severity: medium
+  algorithm: 3DES
+  usage_type: encryption
+  quantum_safety: grover_weakened
+  detector:
+    type: regex
+    pattern: '^\s*Ciphers\b[^#]*\b3des-cbc\b'
+    flags: i
+  message: "sshd Ciphers allows 3des-cbc - 3DES is deprecated (SWEET32) and further weakened by Grover's algorithm."
+  recommendation: "Replace with AES-256-GCM (aes256-gcm@openssh.com)."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'Ciphers 3des-cbc,aes256-ctr'
+    no_match:
+      - 'Ciphers chacha20-poly1305@openssh.com,aes256-ctr'
+- id: SSH_ALLOWED_KEYTYPES_RSA
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: RSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*(HostKeyAlgorithms|PubkeyAcceptedKeyTypes|PubkeyAcceptedAlgorithms)\b[^#]*\b(ssh-rsa|rsa-sha2-256|rsa-sha2-512)\b'
+    flags: i
+  message: "SSH algorithm allowlist accepts RSA key types (ssh-rsa/rsa-sha2-*) - RSA authentication is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Inventory for migration to ML-DSA (FIPS 204) keys as OpenSSH support lands; drop ssh-rsa (SHA-1) immediately."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKeyAlgorithms ssh-rsa,ssh-ed25519'
+    no_match:
+      - 'HostKeyAlgorithms ssh-ed25519,sk-ssh-ed25519@openssh.com'
+- id: SSH_ALLOWED_KEYTYPES_ECDSA
+  language: ssh-config
+  category: crypto-api
+  layer: detection
+  severity: critical
+  algorithm: ECDSA
+  usage_type: signing
+  quantum_safety: vulnerable
+  detector:
+    type: regex
+    pattern: '^\s*(HostKeyAlgorithms|PubkeyAcceptedKeyTypes|PubkeyAcceptedAlgorithms)\b[^#]*\becdsa-sha2-nistp\d+'
+    flags: i
+  message: "SSH algorithm allowlist accepts ECDSA key types (ecdsa-sha2-nistp*) - ECDSA authentication is quantum-vulnerable (Shor's algorithm)."
+  recommendation: "Inventory for migration to ML-DSA (FIPS 204) keys as OpenSSH support lands."
+  cwe: [327]
+  confidence: 0.95
+  examples:
+    match:
+      - 'HostKeyAlgorithms ecdsa-sha2-nistp256,ssh-ed25519'
+    no_match:
+      - 'HostKeyAlgorithms ssh-ed25519'
