@@ -4,7 +4,7 @@ Relix-Q OSS is maintained by XOps Labs and contributors.
 
 ## Project origin
 
-- Yasvanth Udayakumar / XOps Labs
+- [Yasvanth Udayakumar](https://www.linkedin.com/in/yasvanth-udayakumar-55298042/) / XOps Labs — creator and lead maintainer
 
 ## Contributors
 
