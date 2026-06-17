@@ -275,3 +275,11 @@ The scanner flags quantum-vulnerable cryptography and the weak-crypto baseline o
 ## License
 
 Apache License 2.0 — see [`LICENSE`](LICENSE).
+
+---
+
+<div align="center">
+
+Created and maintained by [Yasvanth Udayakumar](https://www.linkedin.com/in/yasvanth-udayakumar-55298042/).
+
+</div>

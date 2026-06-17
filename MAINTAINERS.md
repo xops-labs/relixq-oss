@@ -7,6 +7,7 @@ review, releases, and security coordination.
 
 | Name / team | GitHub | Role | Notes |
 |---|---|---|---|
+| [Yasvanth Udayakumar](https://www.linkedin.com/in/yasvanth-udayakumar-55298042/) | XOps Labs | Creator / lead maintainer | Project direction, review, release, security coordination. |
 | XOps Labs maintainers | `@xops-labs/maintainers` | Project lead / maintainer team | Review, release, security coordination. |
 
 ## Responsibilities
