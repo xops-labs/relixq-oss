@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { Button, Field, Input } from '@/components/ui';
 import { loginAction } from './actions';
 
-export default function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
   return (
     <div className="mx-auto max-w-sm space-y-6">
       <div>
@@ -10,7 +11,7 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
         <p className="text-sm text-muted-foreground">Welcome back to Relix-Q.</p>
       </div>
 
-      {searchParams.error && (
+      {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Invalid email or password.
         </p>

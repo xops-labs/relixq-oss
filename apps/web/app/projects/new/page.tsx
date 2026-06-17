@@ -16,8 +16,9 @@ const MESSAGES: Record<string, string> = {
   failed: 'Could not create the project. Try again.',
 };
 
-export default function NewProjectPage({ searchParams }: { searchParams: { error?: string } }) {
-  const message = searchParams.error ? (MESSAGES[searchParams.error] ?? MESSAGES.failed) : null;
+export default async function NewProjectPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
+  const message = error ? (MESSAGES[error] ?? MESSAGES.failed) : null;
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>

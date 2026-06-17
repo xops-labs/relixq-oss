@@ -9,8 +9,9 @@ const MESSAGES: Record<string, string> = {
   invalid: 'Could not create the account. Check your details and try again.',
 };
 
-export default function SignupPage({ searchParams }: { searchParams: { error?: string } }) {
-  const message = searchParams.error ? (MESSAGES[searchParams.error] ?? MESSAGES.invalid) : null;
+export default async function SignupPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
+  const message = error ? (MESSAGES[error] ?? MESSAGES.invalid) : null;
   return (
     <div className="mx-auto max-w-sm space-y-6">
       <div>

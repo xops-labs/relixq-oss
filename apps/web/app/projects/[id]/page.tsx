@@ -23,12 +23,13 @@ export const dynamic = 'force-dynamic';
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
 
-export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
+export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();
-  const project = await apiGet<Project>(`/api/v1/projects/${params.id}`);
+  const { id } = await params;
+  const project = await apiGet<Project>(`/api/v1/projects/${id}`);
   if (!project) notFound();
 
-  const findings = (await apiGet<Finding[]>(`/api/v1/projects/${params.id}/findings`)) ?? [];
+  const findings = (await apiGet<Finding[]>(`/api/v1/projects/${id}/findings`)) ?? [];
   const rows = findings.map(toFindingRow);
   const scan = project.latestScan;
   const succeeded = scan?.status === 'succeeded';
