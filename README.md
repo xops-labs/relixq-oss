@@ -1,6 +1,32 @@
+<div align="center">
+
 # Relix-Q OSS
 
-> Post-quantum cryptography risk scanner — find quantum-vulnerable crypto across your **source code, dependencies, and TLS endpoints**, score the risk, gate CI with SARIF, and review it in a web UI. Self-hosted, open-source.
+### Post-Quantum Cryptography Scanning · Crypto-Agility · SARIF CI · Self-Hosted
+
+*Self-hosted, open-source post-quantum cryptography risk scanner — find quantum-vulnerable crypto across source code, dependencies, and TLS endpoints, score the risk, grade crypto-agility, gate CI with SARIF, and review findings in a web UI. So security, platform, and engineering teams can inventory and migrate their cryptography before "harvest-now, decrypt-later" becomes decrypt-now.*
+
+![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)
+![Status](https://img.shields.io/badge/status-active_development-2ea44f?style=flat-square)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+
+![CI](https://img.shields.io/github/actions/workflow/status/xops-labs/relixq-oss/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose_ready-2496ED?style=flat-square&logo=docker&logoColor=white)
+![SARIF](https://img.shields.io/badge/SARIF-2.1.0-1f6feb?style=flat-square)
+![Cosign](https://img.shields.io/badge/images-cosign_signed-0f9d58?style=flat-square)
+
+![PQC](https://img.shields.io/badge/PQC-FIPS_203%2F204%2F205-7b2d8e?style=flat-square)
+![Coverage](https://img.shields.io/badge/coverage-47_rule_packs-8957e5?style=flat-square)
+![Languages](https://img.shields.io/badge/languages-30%2B-8957e5?style=flat-square)
+![Scans](https://img.shields.io/badge/scan-code_%C2%B7_deps_%C2%B7_TLS-orange?style=flat-square)
+
+![Self-Hosted](https://img.shields.io/badge/deploy-self--hosted-2ea44f?style=flat-square)
+![Zero lock-in](https://img.shields.io/badge/zero-lock--in-2ea44f?style=flat-square)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-2ea44f?style=flat-square)
+
+</div>
 
 ## Evaluate in 5 minutes — download and scan
 
