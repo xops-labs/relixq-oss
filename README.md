@@ -28,6 +28,12 @@
 
 </div>
 
+<div align="center">
+  <img src="docs/screenshots/web-ui.png" alt="Relix-Q OSS web UI — scan results showing the risk-score gauge, crypto-agility grade, files-scanned and algorithm breakdowns, and the per-finding table" width="900">
+  <br>
+  <em>Web UI — scan results: risk-score gauge, crypto-agility grade, language &amp; algorithm breakdowns, and a per-finding table.</em>
+</div>
+
 ## Evaluate in 5 minutes — download and scan
 
 No clone, no build, no Docker. Grab the archive for your platform from
