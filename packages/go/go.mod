@@ -6,7 +6,7 @@ go 1.25.0
 
 require (
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
-	github.com/evanw/esbuild v0.28.0
+	github.com/evanw/esbuild v0.28.1
 	github.com/fatih/color v1.19.0
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible
@@ -17,6 +17,7 @@ require (
 	github.com/tree-sitter/tree-sitter-julia v0.25.0
 	github.com/z7zmey/php-parser v0.7.2
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/crypto v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -44,7 +45,6 @@ require (
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
